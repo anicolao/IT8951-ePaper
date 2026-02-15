@@ -6,13 +6,26 @@ OUTPUT=""
 
 force_dither=0
 no_dither=0
+profile="7.8in"
 
 FRAME_W=1872
 FRAME_H=1404
 COLOR_THRESHOLD=128
 
 usage() {
-  echo "Usage: ./make_epd_pgm.sh [--force-dither|--no-dither] <input_image> [output.pgm]"
+  echo "Usage: ./make_epd_pgm.sh [options] <input_image> [output.pgm]"
+  echo
+  echo "Display profile (choose one):"
+  echo "  --7.8in          1872x1404 (default)"
+  echo "  --6in            1440x1072"
+  echo
+  echo "Dithering:"
+  echo "  --force-dither   Always use Atkinson dither to 16 gray levels"
+  echo "  --no-dither      Disable dithering"
+  echo "                   (default: auto-dither when unique colors > ${COLOR_THRESHOLD})"
+  echo
+  echo "Other:"
+  echo "  -h, --help       Show this help"
   echo "Example: ./make_epd_pgm.sh ~/Downloads/EscherHandSphere.jpg ~/EHS.pgm"
 }
 
@@ -24,6 +37,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-dither)
       no_dither=1
+      shift
+      ;;
+    --7.8in)
+      profile="7.8in"
+      shift
+      ;;
+    --6in)
+      profile="6in"
       shift
       ;;
     -h|--help)
@@ -56,6 +77,17 @@ done
 
 if (( force_dither == 1 && no_dither == 1 )); then
   echo "Use only one of --force-dither or --no-dither."
+  exit 1
+fi
+
+if [[ "$profile" == "7.8in" ]]; then
+  FRAME_W=1872
+  FRAME_H=1404
+elif [[ "$profile" == "6in" ]]; then
+  FRAME_W=1440
+  FRAME_H=1072
+else
+  echo "Internal error: unknown profile '$profile'"
   exit 1
 fi
 
@@ -121,6 +153,7 @@ elif (( color_count > COLOR_THRESHOLD )); then
 fi
 
 echo "Input after auto-orient: ${img_w}x${img_h}"
+echo "Display profile: ${profile}"
 echo "Target frame: ${FRAME_W}x${FRAME_H}"
 if (( img_h > img_w )); then
   echo "Portrait detected, rotating +90 degrees."

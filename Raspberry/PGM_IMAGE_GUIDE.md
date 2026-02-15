@@ -17,12 +17,16 @@ Options:
 ```bash
 ./make_epd_pgm.sh --force-dither input.jpg output.pgm
 ./make_epd_pgm.sh --no-dither input.jpg output.pgm
+./make_epd_pgm.sh --6in input.jpg output.pgm
+./make_epd_pgm.sh --7.8in input.jpg output.pgm
 ```
 
 What it does:
 - auto-orients image from EXIF
 - rotates portrait images by +90 degrees so long edge matches the frame long edge
-- scales/crops to exactly `1872x1404`
+- scales/crops to the selected display profile:
+  - `--7.8in`: `1872x1404` (default)
+  - `--6in`: `1440x1072`
 - auto-detects "high color count" images and applies Atkinson dithering to 16 grayscale levels
 - writes a strict binary `P5` header and pixel payload
 
