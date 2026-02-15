@@ -6,10 +6,16 @@ DIR_Examples = ./examples
 
 DIR_BIN      = ./bin
 
-OBJ_C = $(wildcard ${DIR_Config}/*.c ${DIR_EPD}/*.c ${DIR_FONTS}/*.c ${DIR_GUI}/*.c ${DIR_Examples}/*.c)
-OBJ_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${OBJ_C}))
+COMMON_C = $(wildcard ${DIR_Config}/*.c ${DIR_EPD}/*.c ${DIR_FONTS}/*.c ${DIR_GUI}/*.c)
+EPD_C = ${DIR_Examples}/example.c ${DIR_Examples}/main.c
+PGM_C = ${DIR_Examples}/pgm_to_epd.c
+
+COMMON_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${COMMON_C}))
+EPD_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${EPD_C}))
+PGM_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${PGM_C}))
 
 TARGET = epd
+TARGET_PGM = epd_pgm
 
 CC = gcc
 
@@ -26,17 +32,22 @@ LIB = BCM
 # LIB = GPIOD
 ifeq ($(LIB), BCM)
     LIB_USE += -lbcm2835
-	OBJ_O := $(filter-out ${DIR_BIN}/RPI_gpiod.o ${DIR_BIN}/dev_hardware_SPI.o, ${OBJ_O})
+	COMMON_O := $(filter-out ${DIR_BIN}/RPI_gpiod.o ${DIR_BIN}/dev_hardware_SPI.o, ${COMMON_O})
 else ifeq ($(LIB), LGPIO)
     LIB_USE += -llgpio -lm
-	OBJ_O := $(filter-out ${DIR_BIN}/RPI_gpiod.o ${DIR_BIN}/dev_hardware_SPI.o, ${OBJ_O})
+	COMMON_O := $(filter-out ${DIR_BIN}/RPI_gpiod.o ${DIR_BIN}/dev_hardware_SPI.o, ${COMMON_O})
 else ifeq ($(LIB), GPIOD)
     LIB_USE += -lgpiod -lm
 endif
 
 $(shell mkdir -p $(DIR_BIN))
 
-${TARGET}: ${OBJ_O}
+all: ${TARGET} ${TARGET_PGM}
+
+${TARGET}: ${COMMON_O} ${EPD_O}
+	$(CC) $(CFLAGS) $^ -o $@ $(LIB_USE)
+
+${TARGET_PGM}: ${COMMON_O} ${PGM_O}
 	$(CC) $(CFLAGS) $^ -o $@ $(LIB_USE)
 
 ${DIR_BIN}/%.o: ${DIR_Config}/%.c
@@ -58,7 +69,8 @@ ${DIR_BIN}/%.d: ${DIR_Config}/%.c
 	@set -e; rm -f $@; \
 	$(CC) -MM $(CFLAGS) $< | sed 's,^,$(DIR_BIN)/,' > $@
 
--include $(patsubst %.c,${DIR_BIN}/%.d,$(notdir ${OBJ_C}))
+DEP_C = ${COMMON_C} ${EPD_C} ${PGM_C}
+-include $(patsubst %.c,${DIR_BIN}/%.d,$(notdir ${DEP_C}))
 
 clean:
-	rm -rf $(DIR_BIN)/* $(TARGET)
+	rm -rf $(DIR_BIN)/* $(TARGET) $(TARGET_PGM)

@@ -36,6 +36,7 @@ Go to the project home directory, /IT8951, and type:
 	make -j4 LIB=GPIOD (use gpiod command to control GPIO, Pi5 can only use this method)
 compiles the program and generates an executable file: 
 	epd
+	epd_pgm
 If you change the program, you need to type: 
 	sudo make clear, then retype: sudo make.
 Note which type of ink screen you purchased. Observe the VCOM value on the FPC line, and know the display mode of the ink screen.
@@ -47,6 +48,27 @@ example 2:
     If you purchased a 13.3inch e-Paper HAT and check the VCOM on the FPC is -2.54 (each screen may be different, see what happens),
 	And that screen is mode 0, then enter:
 		sudo ./epd -2.54 0
+
+For writing a grayscale image file directly to the panel (top-left at 0,0):
+	sudo ./epd_pgm -2.51 ./pic/input.pgm 0
+Parameter format:
+	./epd_pgm <VCOM> <PGM file> [mode]
+Examples:
+	sudo ./epd_pgm -2.51 ./pic/input.pgm
+	sudo ./epd_pgm -2.51 ./pic/input.pgm 1
+Notes:
+	- Input format is PGM grayscale: P5 (binary) or P2 (ASCII), 8-bit or 16-bit maxval.
+	- The image is copied literally from (0,0) with no scaling.
+	- If image width/height is larger than panel width/height, extra pixels are truncated.
+	- Pixels outside the image area are rendered white.
+	- Detailed markdown guide: ./PGM_IMAGE_GUIDE.md
+
+Generate a compatible grayscale PGM image (ImageMagick):
+	# Keep original size, convert to 8-bit grayscale PGM (P5)
+	magick input.png -colorspace Gray -depth 8 -compress none pgm:output.pgm
+
+	# Resize manually before sending (optional)
+	magick input.png -colorspace Gray -depth 8 -resize 1872x1404\\> -compress none pgm:output.pgm
 
 
 3. Model description:

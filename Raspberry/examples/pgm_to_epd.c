@@ -1,0 +1,309 @@
+#include "../lib/Config/DEV_Config.h"
+#include "../lib/e-Paper/EPD_IT8951.h"
+#include "../lib/GUI/GUI_Paint.h"
+
+#include <math.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static UBYTE *g_tx_buf = NULL;
+static IT8951_Dev_Info g_dev_info = {0, 0};
+
+static void cleanup_and_exit(int code)
+{
+    if (g_tx_buf != NULL) {
+        free(g_tx_buf);
+        g_tx_buf = NULL;
+    }
+
+    DEV_Module_Exit();
+    exit(code);
+}
+
+static void signal_handler(int signo)
+{
+    (void)signo;
+    cleanup_and_exit(0);
+}
+
+static int read_pgm_token(FILE *fp, char *token, size_t token_size)
+{
+    int c = 0;
+    size_t idx = 0;
+
+    do {
+        c = fgetc(fp);
+        if (c == '#') {
+            do {
+                c = fgetc(fp);
+            } while (c != '\n' && c != EOF);
+        }
+    } while ((c == ' ' || c == '\t' || c == '\r' || c == '\n') && c != EOF);
+
+    if (c == EOF) {
+        return -1;
+    }
+
+    while (c != EOF && c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '#') {
+        if (idx + 1 >= token_size) {
+            return -1;
+        }
+        token[idx++] = (char)c;
+        c = fgetc(fp);
+    }
+
+    token[idx] = '\0';
+
+    if (c == '#') {
+        do {
+            c = fgetc(fp);
+        } while (c != '\n' && c != EOF);
+    }
+
+    return 0;
+}
+
+static int load_pgm_grayscale(const char *path, UBYTE **pixels, UWORD *width, UWORD *height)
+{
+    FILE *fp = fopen(path, "rb");
+    char token[64];
+    bool is_ascii = false;
+    long w = 0;
+    long h = 0;
+    long maxval = 0;
+    size_t pixel_count = 0;
+    UBYTE *out = NULL;
+    int c = 0;
+
+    if (fp == NULL) {
+        Debug("Failed to open input file: %s\n", path);
+        return -1;
+    }
+
+    if (read_pgm_token(fp, token, sizeof(token)) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    if (strcmp(token, "P5") == 0) {
+        is_ascii = false;
+    } else if (strcmp(token, "P2") == 0) {
+        is_ascii = true;
+    } else {
+        Debug("Input must be PGM (P2 ASCII or P5 binary)\n");
+        fclose(fp);
+        return -1;
+    }
+
+    if (read_pgm_token(fp, token, sizeof(token)) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    w = strtol(token, NULL, 10);
+
+    if (read_pgm_token(fp, token, sizeof(token)) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    h = strtol(token, NULL, 10);
+
+    if (read_pgm_token(fp, token, sizeof(token)) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    maxval = strtol(token, NULL, 10);
+
+    if (w <= 0 || h <= 0 || w > 65535 || h > 65535 || maxval <= 0 || maxval > 65535) {
+        Debug("Invalid PGM header values\n");
+        fclose(fp);
+        return -1;
+    }
+
+    do {
+        c = fgetc(fp);
+        if (c == '#') {
+            do {
+                c = fgetc(fp);
+            } while (c != '\n' && c != EOF);
+        }
+    } while (c == ' ' || c == '\t' || c == '\r' || c == '\n');
+    if (c == EOF) {
+        fclose(fp);
+        return -1;
+    }
+    ungetc(c, fp);
+
+    pixel_count = (size_t)w * (size_t)h;
+    out = (UBYTE *)malloc(pixel_count);
+    if (out == NULL) {
+        Debug("Out of memory while loading image\n");
+        fclose(fp);
+        return -1;
+    }
+
+    if (is_ascii) {
+        for (size_t i = 0; i < pixel_count; i++) {
+            long sample = 0;
+            if (read_pgm_token(fp, token, sizeof(token)) != 0) {
+                Debug("PGM file is shorter than expected\n");
+                free(out);
+                fclose(fp);
+                return -1;
+            }
+            sample = strtol(token, NULL, 10);
+            if (sample < 0) {
+                sample = 0;
+            } else if (sample > maxval) {
+                sample = maxval;
+            }
+
+            if (maxval == 255) {
+                out[i] = (UBYTE)sample;
+            } else {
+                out[i] = (UBYTE)((sample * 255 + (maxval / 2)) / maxval);
+            }
+        }
+    } else {
+        if (maxval <= 255) {
+            UBYTE *tmp = (UBYTE *)malloc(pixel_count);
+            if (tmp == NULL) {
+                free(out);
+                fclose(fp);
+                return -1;
+            }
+
+            if (fread(tmp, 1, pixel_count, fp) != pixel_count) {
+                Debug("PGM file is shorter than expected\n");
+                free(tmp);
+                free(out);
+                fclose(fp);
+                return -1;
+            }
+
+            for (size_t i = 0; i < pixel_count; i++) {
+                if (maxval == 255) {
+                    out[i] = tmp[i];
+                } else {
+                    out[i] = (UBYTE)((tmp[i] * 255 + (maxval / 2)) / maxval);
+                }
+            }
+
+            free(tmp);
+        } else {
+            for (size_t i = 0; i < pixel_count; i++) {
+                int hi = fgetc(fp);
+                int lo = fgetc(fp);
+                unsigned int sample;
+                if (hi == EOF || lo == EOF) {
+                    Debug("PGM file is shorter than expected\n");
+                    free(out);
+                    fclose(fp);
+                    return -1;
+                }
+                sample = ((unsigned int)hi << 8) | (unsigned int)lo;
+                out[i] = (UBYTE)((sample * 255 + (maxval / 2)) / maxval);
+            }
+        }
+    }
+
+    fclose(fp);
+    *pixels = out;
+    *width = (UWORD)w;
+    *height = (UWORD)h;
+    return 0;
+}
+
+static void set_display_mode(int mode)
+{
+    if (mode == 1 || mode == 2) {
+        Paint_SetRotate(ROTATE_0);
+        Paint_SetMirroring(MIRROR_HORIZONTAL);
+    } else {
+        Paint_SetRotate(ROTATE_0);
+        Paint_SetMirroring(MIRROR_NONE);
+    }
+}
+
+static UWORD effective_panel_width(UWORD panel_width, const char *lut_version)
+{
+    if (strcmp(lut_version, "M641") == 0 || strcmp(lut_version, "M841_TFAB512") == 0) {
+        return panel_width - (panel_width % 32);
+    }
+    return panel_width;
+}
+
+int main(int argc, char *argv[])
+{
+    UWORD vcom = 0;
+    int epd_mode = 0;
+    UDOUBLE tx_size = 0;
+    UDOUBLE target_addr = 0;
+    UWORD panel_w = 0;
+    UWORD panel_h = 0;
+    UWORD draw_w = 0;
+    UWORD draw_h = 0;
+    UWORD img_w = 0;
+    UWORD img_h = 0;
+    UBYTE *img_pixels = NULL;
+    double temp_vcom = 0.0;
+
+    signal(SIGINT, signal_handler);
+
+    if (argc < 3 || argc > 4) {
+        Debug("Usage: sudo ./epd_pgm <VCOM> <image.pgm> [mode]\n");
+        Debug("Example: sudo ./epd_pgm -2.51 ./pic/input.pgm 0\n");
+        return 1;
+    }
+
+    if (DEV_Module_Init() != 0) {
+        return 1;
+    }
+
+    sscanf(argv[1], "%lf", &temp_vcom);
+    vcom = (UWORD)(fabs(temp_vcom) * 1000);
+    if (argc == 4) {
+        epd_mode = atoi(argv[3]);
+    }
+
+    g_dev_info = EPD_IT8951_Init(vcom);
+    panel_w = effective_panel_width(g_dev_info.Panel_W, (const char *)g_dev_info.LUT_Version);
+    panel_h = g_dev_info.Panel_H;
+    target_addr = g_dev_info.Memory_Addr_L | (g_dev_info.Memory_Addr_H << 16);
+
+    // Clear first to minimize ghosting from previously displayed content.
+    EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, INIT_Mode);
+
+    if (load_pgm_grayscale(argv[2], &img_pixels, &img_w, &img_h) != 0) {
+        cleanup_and_exit(1);
+    }
+    Debug("Loaded PGM: %ux%u\n", img_w, img_h);
+
+    draw_w = (img_w < panel_w) ? img_w : panel_w;
+    draw_h = (img_h < panel_h) ? img_h : panel_h;
+    Debug("Panel: %ux%u, draw area: %ux%u at (0,0)\n", panel_w, panel_h, draw_w, draw_h);
+
+    tx_size = (UDOUBLE)draw_w * draw_h;
+    g_tx_buf = (UBYTE *)malloc(tx_size);
+    if (g_tx_buf == NULL) {
+        free(img_pixels);
+        Debug("Failed to allocate transfer buffer\n");
+        cleanup_and_exit(1);
+    }
+
+    for (UWORD y = 0; y < draw_h; y++) {
+        memcpy(g_tx_buf + (size_t)y * draw_w, img_pixels + (size_t)y * img_w, draw_w);
+    }
+
+    // Keep mode behavior consistent with other examples.
+    set_display_mode(epd_mode);
+    EPD_IT8951_8bp_Refresh(g_tx_buf, 0, 0, draw_w, draw_h, false, target_addr);
+    DEV_Delay_ms(12000);
+
+    free(img_pixels);
+    img_pixels = NULL;
+
+    cleanup_and_exit(0);
+    return 0;
+}
