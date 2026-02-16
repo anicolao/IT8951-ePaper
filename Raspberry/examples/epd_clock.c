@@ -59,13 +59,15 @@ static void apply_mode(int mode)
     }
 }
 
-static void hand_end(UWORD cx, UWORD cy, double deg, UWORD len, UWORD *x2, UWORD *y2)
+static void hand_end(UWORD cx, UWORD cy, double deg, UWORD len, UWORD max_w, UWORD max_h, UWORD *x2, UWORD *y2)
 {
     double rad = deg * M_PI / 180.0;
     int x = (int)lround((double)cx + cos(rad) * (double)len);
     int y = (int)lround((double)cy + sin(rad) * (double)len);
     if (x < 0) x = 0;
     if (y < 0) y = 0;
+    if (x >= (int)max_w) x = (int)max_w - 1;
+    if (y >= (int)max_h) y = (int)max_h - 1;
     *x2 = (UWORD)x;
     *y2 = (UWORD)y;
 }
@@ -85,18 +87,18 @@ static void draw_clock_face(UWORD w, UWORD h, struct tm *tm_now)
         UWORD r1 = radius - ((i % 5 == 0) ? 16 : 8);
         UWORD r2 = radius - 2;
         UWORD tx1, ty1, tx2, ty2;
-        hand_end(cx, cy, a, r1, &tx1, &ty1);
-        hand_end(cx, cy, a, r2, &tx2, &ty2);
+        hand_end(cx, cy, a, r1, w, h, &tx1, &ty1);
+        hand_end(cx, cy, a, r2, w, h, &tx2, &ty2);
         Paint_DrawLine(tx1, ty1, tx2, ty2, (i % 5 == 0) ? 0x00 : 0x90, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
     }
 
     double hour_deg = (((tm_now->tm_hour % 12) + tm_now->tm_min / 60.0) * 30.0) - 90.0;
     double min_deg = (tm_now->tm_min * 6.0) - 90.0;
 
-    hand_end(cx, cy, hour_deg, radius * 55 / 100, &x2, &y2);
+    hand_end(cx, cy, hour_deg, radius * 55 / 100, w, h, &x2, &y2);
     Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
 
-    hand_end(cx, cy, min_deg, radius * 75 / 100, &x2, &y2);
+    hand_end(cx, cy, min_deg, radius * 75 / 100, w, h, &x2, &y2);
     Paint_DrawLine(cx, cy, x2, y2, 0x10, DOT_PIXEL_2X2, LINE_STYLE_SOLID);
 
     Paint_DrawCircle(cx, cy, 4, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
@@ -108,7 +110,7 @@ static void second_hand_end(UWORD w, UWORD h, int sec, UWORD *x2, UWORD *y2)
     UWORD cy = h / 2;
     UWORD radius = (w < h ? w : h) / 2 - 16;
     double sec_deg = (sec * 6.0) - 90.0;
-    hand_end(cx, cy, sec_deg, radius * 90 / 100, x2, y2);
+    hand_end(cx, cy, sec_deg, radius * 90 / 100, w, h, x2, y2);
 }
 
 static void draw_second_hand(UWORD w, UWORD h, int sec, UBYTE color, int ox, int oy)
@@ -138,17 +140,17 @@ static void draw_clock_face_mono(UWORD w, UWORD h, struct tm *tm_now)
         UWORD r1 = radius - ((i % 5 == 0) ? 16 : 8);
         UWORD r2 = radius - 2;
         UWORD tx1, ty1, tx2, ty2;
-        hand_end(cx, cy, a, r1, &tx1, &ty1);
-        hand_end(cx, cy, a, r2, &tx2, &ty2);
+        hand_end(cx, cy, a, r1, w, h, &tx1, &ty1);
+        hand_end(cx, cy, a, r2, w, h, &tx2, &ty2);
         Paint_DrawLine(tx1, ty1, tx2, ty2, 0x00, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
     }
 
     {
         double hour_deg = (((tm_now->tm_hour % 12) + tm_now->tm_min / 60.0) * 30.0) - 90.0;
         double min_deg = (tm_now->tm_min * 6.0) - 90.0;
-        hand_end(cx, cy, hour_deg, radius * 55 / 100, &x2, &y2);
+        hand_end(cx, cy, hour_deg, radius * 55 / 100, w, h, &x2, &y2);
         Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
-        hand_end(cx, cy, min_deg, radius * 75 / 100, &x2, &y2);
+        hand_end(cx, cy, min_deg, radius * 75 / 100, w, h, &x2, &y2);
         Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_2X2, LINE_STYLE_SOLID);
     }
 
