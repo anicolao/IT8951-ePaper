@@ -342,6 +342,7 @@ int main(int argc, char *argv[])
             align_bbox_for_1bpp(&x0, &x1, panel_w);
             bw = (UWORD)(x1 - x0 + 1);
             bh = (UWORD)(y1 - y0 + 1);
+#if DEBUG_WITH_BOUNDING_BOX
             {
                 UWORD abs_x = (UWORD)x0;
                 UWORD abs_y = (UWORD)y0;
@@ -350,6 +351,7 @@ int main(int argc, char *argv[])
                       abs_x, abs_y, bw, bh,
                       abs_x % 32, bw % 32, abs_y % 2, bh % 2);
             }
+#endif
 
             Paint_NewImage(g_mono_area_buf, bw, bh, 0, BLACK);
             Paint_SelectImage(g_mono_area_buf);
