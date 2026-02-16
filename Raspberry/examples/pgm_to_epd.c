@@ -342,8 +342,9 @@ int main(int argc, char *argv[])
         EPD_IT8951_8bp_Refresh(g_tx_buf, 0, 0, draw_w, draw_h, false, target_addr);
     }
 
-    // Ensure display update has completed before timing/reporting.
+    // Ensure display update completes on panel before exiting module I/O.
     wait_for_display_ready();
+    DEV_Delay_ms(12000);
     update_end_s = monotonic_seconds();
 
     free(img_pixels);
@@ -355,6 +356,8 @@ int main(int argc, char *argv[])
     Debug("Image update time: %.3f seconds\n", update_end_s - update_start_s);
     Debug("Total wall clock (init->finish): %.3f seconds\n", wall_end_s - wall_start_s);
 
+    EPD_IT8951_Sleep();
+    DEV_Delay_ms(5000);
     DEV_Module_Exit();
     return 0;
 }
