@@ -148,12 +148,12 @@ static void align_bbox_for_4bpp(int *x0, int *x1, int max_w)
     if (*x1 >= max_w) *x1 = max_w - 1;
 
     w = *x1 - *x0 + 1;
-    aw = (w + 3) & ~3; // 4-pixel multiple for 4bpp packed path in this driver
+    aw = (w + 3) & ~3; // width must be 4-pixel aligned for packed 4bpp writes
     if (aw < 4) aw = 4;
     if (aw > max_w) aw = max_w & ~3;
     if (aw <= 0) aw = max_w;
 
-    *x0 &= ~1; // even start pixel
+    *x0 &= ~3; // start X also 4-pixel aligned to avoid nibble/word ambiguity
     if (*x0 < 0) *x0 = 0;
     if (*x0 + aw > max_w) {
         *x0 = max_w - aw;
@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
     UDOUBLE roi_size = 0;
     int last_min = -1;
     int last_sec = -1;
-    const UBYTE sec_phase[3] = {0xC0, 0xF0, 0x00};
+    const UBYTE sec_phase[3] = {0xC0, 0x00, 0xF0};
 
     signal(SIGINT, signal_handler);
 
@@ -274,6 +274,7 @@ int main(int argc, char *argv[])
 
         if (tm_now.tm_sec != last_sec) {
             int prev_sec = (last_sec < 0) ? tm_now.tm_sec : last_sec;
+            UBYTE sec_color = sec_phase[tm_now.tm_sec % 3];
             UWORD cx = roi_w / 2, cy = roi_h / 2;
             UWORD xp, yp, xn, yn;
             int margin = 8;
@@ -297,19 +298,15 @@ int main(int argc, char *argv[])
             bw = (UWORD)(x1 - x0 + 1);
             bh = (UWORD)(y1 - y0 + 1);
 
-            for (int p = 0; p < 3; p++) {
-                // Destination is a compact bw x bh subimage; use bw as destination stride.
-                copy_face_region_4bpp(g_face_buf, roi_w, g_roi_buf, bw, (UWORD)x0, (UWORD)y0, bw, bh);
-                Paint_NewImage(g_roi_buf, bw, bh, 0, BLACK);
-                Paint_SelectImage(g_roi_buf);
-                apply_mode(epd_mode);
-                Paint_SetBitsPerPixel(4);
-                draw_second_hand(roi_w, roi_h, tm_now.tm_sec, sec_phase[p], x0, y0);
-                EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, false, target_addr, true);
-                if (p < 2) {
-                    DEV_Delay_ms(80);
-                }
-            }
+            // Destination is a compact bw x bh subimage; use bw as destination stride.
+            copy_face_region_4bpp(g_face_buf, roi_w, g_roi_buf, bw, (UWORD)x0, (UWORD)y0, bw, bh);
+            Paint_NewImage(g_roi_buf, bw, bh, 0, BLACK);
+            Paint_SelectImage(g_roi_buf);
+            apply_mode(epd_mode);
+            Paint_SetBitsPerPixel(4);
+            // One incremental update per second; color cycles light -> black -> white by second.
+            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, sec_color, x0, y0);
+            EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, false, target_addr, true);
             last_sec = tm_now.tm_sec;
         }
 
