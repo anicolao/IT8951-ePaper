@@ -328,7 +328,8 @@ int main(int argc, char *argv[])
             Paint_SelectImage(g_mono_area_buf);
             apply_mode(epd_mode);
             Paint_SetBitsPerPixel(1);
-            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, second_color, x0, y0);
+            // Debug mode: draw only the ROI bounding box outline so corruption location is obvious.
+            Paint_DrawRectangle(0, 0, bw - 1, bh - 1, 0x00, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
             EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, true);
             last_sec = tm_now.tm_sec;
         }
