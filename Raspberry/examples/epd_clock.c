@@ -139,6 +139,30 @@ static inline void set_4bpp_pixel(UBYTE *buf, UWORD w, UWORD x, UWORD y, UBYTE g
     }
 }
 
+static void align_bbox_for_4bpp(int *x0, int *x1, int max_w)
+{
+    int w = *x1 - *x0 + 1;
+    int aw;
+
+    if (*x0 < 0) *x0 = 0;
+    if (*x1 >= max_w) *x1 = max_w - 1;
+
+    w = *x1 - *x0 + 1;
+    aw = (w + 3) & ~3; // 4-pixel multiple for 4bpp packed path in this driver
+    if (aw < 4) aw = 4;
+    if (aw > max_w) aw = max_w & ~3;
+    if (aw <= 0) aw = max_w;
+
+    *x0 &= ~1; // even start pixel
+    if (*x0 < 0) *x0 = 0;
+    if (*x0 + aw > max_w) {
+        *x0 = max_w - aw;
+        if (*x0 < 0) *x0 = 0;
+    }
+    *x1 = *x0 + aw - 1;
+    if (*x1 >= max_w) *x1 = max_w - 1;
+}
+
 static void copy_face_region_4bpp(const UBYTE *src, UWORD src_w, UBYTE *dst, UWORD dst_w,
                                   UWORD sx, UWORD sy, UWORD w, UWORD h)
 {
@@ -268,6 +292,8 @@ int main(int argc, char *argv[])
             if (y0 < 0) y0 = 0;
             if (x1 >= (int)roi_w) x1 = (int)roi_w - 1;
             if (y1 >= (int)roi_h) y1 = (int)roi_h - 1;
+
+            align_bbox_for_4bpp(&x0, &x1, roi_w);
             bw = (UWORD)(x1 - x0 + 1);
             bh = (UWORD)(y1 - y0 + 1);
 
