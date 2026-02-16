@@ -21,11 +21,13 @@
 
 static IT8951_Dev_Info g_dev_info = {0, 0};
 static UBYTE *g_mono_panel_face_buf = NULL;
+static UBYTE *g_mono_panel_bg_buf = NULL;
 static UBYTE *g_mono_area_buf = NULL;
 
 static void cleanup_and_exit(int code)
 {
     if (g_mono_panel_face_buf != NULL) { free(g_mono_panel_face_buf); g_mono_panel_face_buf = NULL; }
+    if (g_mono_panel_bg_buf != NULL) { free(g_mono_panel_bg_buf); g_mono_panel_bg_buf = NULL; }
     if (g_mono_area_buf != NULL) { free(g_mono_area_buf); g_mono_area_buf = NULL; }
     if (g_dev_info.Panel_W != 0) {
         EPD_IT8951_Sleep();
@@ -139,14 +141,13 @@ static double elapsed_seconds(const struct timespec *a, const struct timespec *b
     return (double)(b->tv_sec - a->tv_sec) + ((double)(b->tv_nsec - a->tv_nsec) / 1e9);
 }
 
-static void draw_hands_mono(UWORD w, UWORD h, int hour, int min, int sec, int ox, int oy)
+static void draw_hour_minute_hands_mono(UWORD w, UWORD h, int hour, int min, int ox, int oy)
 {
     UWORD cx = w / 2;
     UWORD cy = h / 2;
-    UWORD hx, hy, mx, my, sx, sy;
+    UWORD hx, hy, mx, my;
     hour_hand_end(w, h, hour, min, &hx, &hy);
     minute_hand_end(w, h, min, &mx, &my);
-    second_hand_end(w, h, sec, &sx, &sy);
 
     Paint_DrawLine((UWORD)((int)cx - ox), (UWORD)((int)cy - oy),
                    (UWORD)((int)hx - ox), (UWORD)((int)hy - oy),
@@ -154,6 +155,15 @@ static void draw_hands_mono(UWORD w, UWORD h, int hour, int min, int sec, int ox
     Paint_DrawLine((UWORD)((int)cx - ox), (UWORD)((int)cy - oy),
                    (UWORD)((int)mx - ox), (UWORD)((int)my - oy),
                    0x00, DOT_PIXEL_2X2, LINE_STYLE_SOLID);
+}
+
+static void draw_second_hand_mono(UWORD w, UWORD h, int sec, int ox, int oy)
+{
+    UWORD cx = w / 2;
+    UWORD cy = h / 2;
+    UWORD sx, sy;
+    second_hand_end(w, h, sec, &sx, &sy);
+
     Paint_DrawLine((UWORD)((int)cx - ox), (UWORD)((int)cy - oy),
                    (UWORD)((int)sx - ox), (UWORD)((int)sy - oy),
                    0x00, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
@@ -218,7 +228,6 @@ int main(int argc, char *argv[])
     UWORD roi_h = 0;
     UDOUBLE mono_panel_size = 0;
     UDOUBLE mono_roi_size = 0;
-    UDOUBLE base_addr = 0;
     int last_hour = -1;
     int last_min = -1;
     int last_sec = -1;
@@ -246,7 +255,6 @@ int main(int argc, char *argv[])
     panel_w = effective_panel_width(g_dev_info.Panel_W, (const char *)g_dev_info.LUT_Version);
     panel_h = g_dev_info.Panel_H;
     target_addr = g_dev_info.Memory_Addr_L | (g_dev_info.Memory_Addr_H << 16);
-    base_addr = target_addr;
 
     // For second-hand updates we now compute ROIs directly on full-panel coordinates.
     roi_w = panel_w;
@@ -256,26 +264,35 @@ int main(int argc, char *argv[])
     mono_roi_size = ((roi_w + 7) / 8) * roi_h;
 
     g_mono_panel_face_buf = (UBYTE *)malloc(mono_panel_size);
+    g_mono_panel_bg_buf = (UBYTE *)malloc(mono_panel_size);
     g_mono_area_buf = (UBYTE *)malloc(mono_roi_size);
-    if (g_mono_panel_face_buf == NULL || g_mono_area_buf == NULL) {
+    if (g_mono_panel_face_buf == NULL || g_mono_panel_bg_buf == NULL || g_mono_area_buf == NULL) {
         Debug("Failed to allocate clock buffers\n");
         cleanup_and_exit(1);
     }
 
     EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, INIT_Mode);
     {
+        time_t t_init = time(NULL);
+        struct tm tm_init;
         struct timespec t0, t1, t2, t3;
+        localtime_r(&t_init, &tm_init);
         clock_gettime(CLOCK_MONOTONIC, &t0);
+        Paint_NewImage(g_mono_panel_bg_buf, panel_w, panel_h, 0, BLACK);
+        Paint_SelectImage(g_mono_panel_bg_buf);
+        apply_mode(epd_mode);
+        Paint_SetBitsPerPixel(1);
+        draw_clock_background_mono(panel_w, panel_h);
+        memcpy(g_mono_panel_face_buf, g_mono_panel_bg_buf, (size_t)mono_panel_size);
         Paint_NewImage(g_mono_panel_face_buf, panel_w, panel_h, 0, BLACK);
         Paint_SelectImage(g_mono_panel_face_buf);
         apply_mode(epd_mode);
         Paint_SetBitsPerPixel(1);
-        draw_clock_background_mono(panel_w, panel_h);
+        draw_hour_minute_hands_mono(panel_w, panel_h, tm_init.tm_hour, tm_init.tm_min, 0, 0);
         clock_gettime(CLOCK_MONOTONIC, &t1);
-        EPD_IT8951_1bp_Multi_Frame_Write(g_mono_panel_face_buf, 0, 0, panel_w, panel_h, base_addr, true);
+        EPD_IT8951_1bp_Refresh(g_mono_panel_face_buf, 0, 0, panel_w, panel_h, GC16_Mode, target_addr, true);
         clock_gettime(CLOCK_MONOTONIC, &t2);
-        EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(0, 0, panel_w, panel_h, GC16_Mode, base_addr);
-        clock_gettime(CLOCK_MONOTONIC, &t3);
+        t3 = t2;
         Debug("Initial base face load: compose=%.3fs write=%.3fs refresh=%.3fs total=%.3fs\n",
               elapsed_seconds(&t0, &t1),
               elapsed_seconds(&t1, &t2),
@@ -292,6 +309,7 @@ int main(int argc, char *argv[])
             int prev_hour = (last_hour < 0) ? tm_now.tm_hour : last_hour;
             int prev_min = (last_min < 0) ? tm_now.tm_min : last_min;
             int prev_sec = (last_sec < 0) ? tm_now.tm_sec : last_sec;
+            bool hm_changed = (tm_now.tm_min != last_min) || (tm_now.tm_hour != last_hour);
             UWORD cx = panel_w / 2, cy = panel_h / 2;
             UWORD x_old_h, y_old_h, x_old_m, y_old_m, x_old_s, y_old_s;
             UWORD x_new_h, y_new_h, x_new_m, y_new_m, x_new_s, y_new_s;
@@ -310,11 +328,15 @@ int main(int argc, char *argv[])
             x1 = 0;
             y1 = 0;
             expand_bbox(&x0, &y0, &x1, &y1, cx, cy, 8, panel_w, panel_h);
-            expand_bbox(&x0, &y0, &x1, &y1, x_old_h, y_old_h, 8, panel_w, panel_h);
-            expand_bbox(&x0, &y0, &x1, &y1, x_old_m, y_old_m, 6, panel_w, panel_h);
+            if (hm_changed) {
+                expand_bbox(&x0, &y0, &x1, &y1, x_old_h, y_old_h, 8, panel_w, panel_h);
+                expand_bbox(&x0, &y0, &x1, &y1, x_old_m, y_old_m, 6, panel_w, panel_h);
+            }
             expand_bbox(&x0, &y0, &x1, &y1, x_old_s, y_old_s, 4, panel_w, panel_h);
-            expand_bbox(&x0, &y0, &x1, &y1, x_new_h, y_new_h, 8, panel_w, panel_h);
-            expand_bbox(&x0, &y0, &x1, &y1, x_new_m, y_new_m, 6, panel_w, panel_h);
+            if (hm_changed) {
+                expand_bbox(&x0, &y0, &x1, &y1, x_new_h, y_new_h, 8, panel_w, panel_h);
+                expand_bbox(&x0, &y0, &x1, &y1, x_new_m, y_new_m, 6, panel_w, panel_h);
+            }
             expand_bbox(&x0, &y0, &x1, &y1, x_new_s, y_new_s, 4, panel_w, panel_h);
 
             align_bbox_for_1bpp(&x0, &x1, panel_w);
@@ -333,6 +355,18 @@ int main(int argc, char *argv[])
             Paint_SelectImage(g_mono_area_buf);
             apply_mode(epd_mode);
             Paint_SetBitsPerPixel(1);
+            if (hm_changed) {
+                memcpy(g_mono_panel_face_buf, g_mono_panel_bg_buf, (size_t)mono_panel_size);
+                Paint_NewImage(g_mono_panel_face_buf, panel_w, panel_h, 0, BLACK);
+                Paint_SelectImage(g_mono_panel_face_buf);
+                apply_mode(epd_mode);
+                Paint_SetBitsPerPixel(1);
+                draw_hour_minute_hands_mono(panel_w, panel_h, tm_now.tm_hour, tm_now.tm_min, 0, 0);
+                Paint_NewImage(g_mono_area_buf, bw, bh, 0, BLACK);
+                Paint_SelectImage(g_mono_area_buf);
+                apply_mode(epd_mode);
+                Paint_SetBitsPerPixel(1);
+            }
             // Start from cached 1bpp clock face for this minute, then overlay second hand.
             {
                 UWORD src_stride = (panel_w + 7) / 8;
@@ -346,7 +380,7 @@ int main(int argc, char *argv[])
 #if DEBUG_WITH_BOUNDING_BOX
             draw_rect_outline_raw(bw, bh, 0x00);
 #else
-            draw_hands_mono(panel_w, panel_h, tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec, x0, y0);
+            draw_second_hand_mono(panel_w, panel_h, tm_now.tm_sec, x0, y0);
 #endif
             EPD_IT8951_1bp_Refresh(g_mono_area_buf, (UWORD)x0, (UWORD)y0, bw, bh, A2_Mode, target_addr, false);
             last_hour = tm_now.tm_hour;
@@ -359,7 +393,7 @@ int main(int argc, char *argv[])
                 if (refresh_key != last_quality_refresh_key) {
                     struct timespec q0, q1;
                     clock_gettime(CLOCK_MONOTONIC, &q0);
-                    EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(0, 0, panel_w, panel_h, GC16_Mode, base_addr);
+                    EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(0, 0, panel_w, panel_h, GC16_Mode, target_addr);
                     clock_gettime(CLOCK_MONOTONIC, &q1);
                     last_quality_refresh_key = refresh_key;
                     Debug("Quality full refresh at %02d:%02d:%02d took %.3fs (period=%d min)\n",
