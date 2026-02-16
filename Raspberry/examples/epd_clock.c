@@ -12,6 +12,7 @@
 
 static IT8951_Dev_Info g_dev_info = {0, 0};
 static UBYTE *g_full_buf = NULL;
+static UBYTE *g_face_buf = NULL;
 static UBYTE *g_roi_buf = NULL;
 
 static void cleanup_and_exit(int code)
@@ -20,10 +21,8 @@ static void cleanup_and_exit(int code)
         free(g_full_buf);
         g_full_buf = NULL;
     }
-    if (g_roi_buf != NULL) {
-        free(g_roi_buf);
-        g_roi_buf = NULL;
-    }
+    if (g_face_buf != NULL) { free(g_face_buf); g_face_buf = NULL; }
+    if (g_roi_buf != NULL) { free(g_roi_buf); g_roi_buf = NULL; }
     if (g_dev_info.Panel_W != 0) {
         EPD_IT8951_Sleep();
     }
@@ -67,7 +66,7 @@ static void hand_end(UWORD cx, UWORD cy, double deg, UWORD len, UWORD *x2, UWORD
     *y2 = (UWORD)y;
 }
 
-static void draw_clock_scene(UWORD w, UWORD h, struct tm *tm_now, UBYTE second_color)
+static void draw_clock_face(UWORD w, UWORD h, struct tm *tm_now)
 {
     UWORD cx = w / 2;
     UWORD cy = h / 2;
@@ -89,7 +88,6 @@ static void draw_clock_scene(UWORD w, UWORD h, struct tm *tm_now, UBYTE second_c
 
     double hour_deg = (((tm_now->tm_hour % 12) + tm_now->tm_min / 60.0) * 30.0) - 90.0;
     double min_deg = ((tm_now->tm_min + tm_now->tm_sec / 60.0) * 6.0) - 90.0;
-    double sec_deg = (tm_now->tm_sec * 6.0) - 90.0;
 
     hand_end(cx, cy, hour_deg, radius * 55 / 100, &x2, &y2);
     Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
@@ -97,10 +95,59 @@ static void draw_clock_scene(UWORD w, UWORD h, struct tm *tm_now, UBYTE second_c
     hand_end(cx, cy, min_deg, radius * 75 / 100, &x2, &y2);
     Paint_DrawLine(cx, cy, x2, y2, 0x10, DOT_PIXEL_2X2, LINE_STYLE_SOLID);
 
-    hand_end(cx, cy, sec_deg, radius * 90 / 100, &x2, &y2);
-    Paint_DrawLine(cx, cy, x2, y2, second_color, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-
     Paint_DrawCircle(cx, cy, 4, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+}
+
+static void second_hand_end(UWORD w, UWORD h, int sec, UWORD *x2, UWORD *y2)
+{
+    UWORD cx = w / 2;
+    UWORD cy = h / 2;
+    UWORD radius = (w < h ? w : h) / 2 - 16;
+    double sec_deg = (sec * 6.0) - 90.0;
+    hand_end(cx, cy, sec_deg, radius * 90 / 100, x2, y2);
+}
+
+static void draw_second_hand(UWORD w, UWORD h, int sec, UBYTE color, int ox, int oy)
+{
+    UWORD cx = w / 2;
+    UWORD cy = h / 2;
+    UWORD x2, y2;
+    second_hand_end(w, h, sec, &x2, &y2);
+    Paint_DrawLine((UWORD)((int)cx - ox), (UWORD)((int)cy - oy),
+                   (UWORD)((int)x2 - ox), (UWORD)((int)y2 - oy),
+                   color, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    Paint_DrawCircle((UWORD)((int)cx - ox), (UWORD)((int)cy - oy), 3, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+}
+
+static inline UBYTE get_4bpp_pixel(const UBYTE *buf, UWORD w, UWORD x, UWORD y)
+{
+    UWORD wb = (w + 1) / 2;
+    UBYTE b = buf[(size_t)y * wb + x / 2];
+    UBYTE n = (x & 1) ? (b >> 4) : (b & 0x0F);
+    return (UBYTE)(n << 4);
+}
+
+static inline void set_4bpp_pixel(UBYTE *buf, UWORD w, UWORD x, UWORD y, UBYTE gray)
+{
+    UWORD wb = (w + 1) / 2;
+    UBYTE *p = &buf[(size_t)y * wb + x / 2];
+    UBYTE n = (UBYTE)((gray >> 4) & 0x0F);
+    if (x & 1) {
+        *p = (UBYTE)((*p & 0x0F) | (n << 4));
+    } else {
+        *p = (UBYTE)((*p & 0xF0) | n);
+    }
+}
+
+static void copy_face_region_4bpp(const UBYTE *src, UWORD src_w, UBYTE *dst, UWORD dst_w,
+                                  UWORD sx, UWORD sy, UWORD w, UWORD h)
+{
+    for (UWORD y = 0; y < h; y++) {
+        for (UWORD x = 0; x < w; x++) {
+            UBYTE g = get_4bpp_pixel(src, src_w, sx + x, sy + y);
+            set_4bpp_pixel(dst, dst_w, x, y, g);
+        }
+    }
 }
 
 int main(int argc, char *argv[])
@@ -119,7 +166,7 @@ int main(int argc, char *argv[])
     UDOUBLE roi_size = 0;
     int last_min = -1;
     int last_sec = -1;
-    const UBYTE sec_phase[3] = {0xC0, 0x00, 0xF0};
+    const UBYTE sec_phase[3] = {0xC0, 0xF0, 0x00};
 
     signal(SIGINT, signal_handler);
 
@@ -159,8 +206,9 @@ int main(int argc, char *argv[])
     roi_y = (panel_h - roi_h) / 2;
 
     roi_size = ((roi_w * 4 % 8 == 0) ? (roi_w * 4 / 8) : (roi_w * 4 / 8 + 1)) * roi_h;
+    g_face_buf = (UBYTE *)malloc(roi_size);
     g_roi_buf = (UBYTE *)malloc(roi_size);
-    if (g_roi_buf == NULL) {
+    if (g_face_buf == NULL || g_roi_buf == NULL) {
         Debug("Failed to allocate ROI buffer\n");
         cleanup_and_exit(1);
     }
@@ -179,11 +227,18 @@ int main(int argc, char *argv[])
             Paint_SetBitsPerPixel(4);
             Paint_Clear(WHITE);
 
+            Paint_NewImage(g_face_buf, roi_w, roi_h, 0, BLACK);
+            Paint_SelectImage(g_face_buf);
+            apply_mode(epd_mode);
+            Paint_SetBitsPerPixel(4);
+            draw_clock_face(roi_w, roi_h, &tm_now);
+
+            memcpy(g_roi_buf, g_face_buf, (size_t)roi_size);
             Paint_NewImage(g_roi_buf, roi_w, roi_h, 0, BLACK);
             Paint_SelectImage(g_roi_buf);
             apply_mode(epd_mode);
             Paint_SetBitsPerPixel(4);
-            draw_clock_scene(roi_w, roi_h, &tm_now, 0x00);
+            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, 0x00, 0, 0);
 
             EPD_IT8951_4bp_Refresh(g_full_buf, 0, 0, panel_w, panel_h, false, target_addr, true);
             EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x, roi_y, roi_w, roi_h, false, target_addr, true);
@@ -194,15 +249,38 @@ int main(int argc, char *argv[])
         }
 
         if (tm_now.tm_sec != last_sec) {
+            int prev_sec = (last_sec < 0) ? tm_now.tm_sec : last_sec;
+            UWORD cx = roi_w / 2, cy = roi_h / 2;
+            UWORD xp, yp, xn, yn;
+            int margin = 8;
+            int x0, y0, x1, y1;
+            UWORD bw, bh;
+
+            second_hand_end(roi_w, roi_h, prev_sec, &xp, &yp);
+            second_hand_end(roi_w, roi_h, tm_now.tm_sec, &xn, &yn);
+
+            x0 = (int)cx; if ((int)xp < x0) x0 = xp; if ((int)xn < x0) x0 = xn; x0 -= margin;
+            y0 = (int)cy; if ((int)yp < y0) y0 = yp; if ((int)yn < y0) y0 = yn; y0 -= margin;
+            x1 = (int)cx; if ((int)xp > x1) x1 = xp; if ((int)xn > x1) x1 = xn; x1 += margin;
+            y1 = (int)cy; if ((int)yp > y1) y1 = yp; if ((int)yn > y1) y1 = yn; y1 += margin;
+
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 >= (int)roi_w) x1 = (int)roi_w - 1;
+            if (y1 >= (int)roi_h) y1 = (int)roi_h - 1;
+            bw = (UWORD)(x1 - x0 + 1);
+            bh = (UWORD)(y1 - y0 + 1);
+
             for (int p = 0; p < 3; p++) {
-                Paint_NewImage(g_roi_buf, roi_w, roi_h, 0, BLACK);
+                copy_face_region_4bpp(g_face_buf, roi_w, g_roi_buf, roi_w, (UWORD)x0, (UWORD)y0, bw, bh);
+                Paint_NewImage(g_roi_buf, bw, bh, 0, BLACK);
                 Paint_SelectImage(g_roi_buf);
                 apply_mode(epd_mode);
                 Paint_SetBitsPerPixel(4);
-                draw_clock_scene(roi_w, roi_h, &tm_now, sec_phase[p]);
-                EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x, roi_y, roi_w, roi_h, false, target_addr, true);
+                draw_second_hand(roi_w, roi_h, tm_now.tm_sec, sec_phase[p], x0, y0);
+                EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, false, target_addr, true);
                 if (p < 2) {
-                    DEV_Delay_ms(150);
+                    DEV_Delay_ms(80);
                 }
             }
             last_sec = tm_now.tm_sec;
