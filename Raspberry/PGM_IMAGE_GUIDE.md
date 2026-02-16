@@ -121,3 +121,23 @@ Notes:
 - Program prints:
   - image update time (refresh path only)
   - total wall clock time from initialization to finish
+
+## 6. Clear mode recommendations
+
+`epd_pgm` supports three pre-clear behaviors:
+
+- default (no flag): `INIT` 4bpp clear
+  - Best image quality / least ghosting
+  - Slowest startup
+- `--fast-clear`: 1bpp packed clear
+  - Much faster startup
+  - May leave some residual ghosting/artifacts
+- `--no-clear`: skip clear
+  - Fastest startup
+  - Highest risk of ghosting from previous frame
+
+Recommended usage:
+
+- Final quality display: use default clear (no flag)
+- Fast iteration / previews: use `--fast-clear`
+- Controlled experiments only: use `--no-clear`
