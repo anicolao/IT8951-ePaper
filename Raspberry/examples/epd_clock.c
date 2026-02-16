@@ -198,7 +198,6 @@ int main(int argc, char *argv[])
     UDOUBLE mono_full_size = 0;
     int last_min = -1;
     int last_sec = -1;
-    const UBYTE second_color = 0x00;
 
     signal(SIGINT, signal_handler);
 
@@ -315,19 +314,11 @@ int main(int argc, char *argv[])
             bw = (UWORD)(x1 - x0 + 1);
             bh = (UWORD)(y1 - y0 + 1);
 
-            {
-                UWORD src_wb = (roi_w + 7) / 8;
-                UWORD dst_wb = (bw + 7) / 8;
-                for (UWORD yy = 0; yy < bh; yy++) {
-                    memcpy(g_mono_area_buf + (size_t)yy * dst_wb,
-                           g_mono_face_buf + (size_t)(y0 + yy) * src_wb + (x0 / 8),
-                           dst_wb);
-                }
-            }
             Paint_NewImage(g_mono_area_buf, bw, bh, 0, BLACK);
             Paint_SelectImage(g_mono_area_buf);
             apply_mode(epd_mode);
             Paint_SetBitsPerPixel(1);
+            Paint_Clear(WHITE);
             // Debug mode: draw only the ROI bounding box outline so corruption location is obvious.
             Paint_DrawRectangle(0, 0, bw - 1, bh - 1, 0x00, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
             EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, true);
