@@ -10,6 +10,10 @@
 #include <string.h>
 #include <time.h>
 
+#ifndef DEBUG_WITH_BOUNDING_BOX
+#define DEBUG_WITH_BOUNDING_BOX 0
+#endif
+
 static IT8951_Dev_Info g_dev_info = {0, 0};
 static UBYTE *g_full_buf = NULL;
 static UBYTE *g_face_buf = NULL;
@@ -353,9 +357,21 @@ int main(int argc, char *argv[])
             Paint_SelectImage(g_mono_area_buf);
             apply_mode(epd_mode);
             Paint_SetBitsPerPixel(1);
-            Paint_Clear(WHITE);
-            // Debug mode: draw only the ROI bounding box outline so corruption location is obvious.
+            // Start from cached 1bpp clock face for this minute, then overlay second hand.
+            {
+                UWORD src_stride = (roi_w + 7) / 8;
+                UWORD dst_stride = (bw + 7) / 8;
+                for (UWORD ry = 0; ry < bh; ry++) {
+                    memcpy(g_mono_area_buf + (ry * dst_stride),
+                           g_mono_face_buf + (((UWORD)y0 + ry) * src_stride) + ((UWORD)x0 / 8),
+                           dst_stride);
+                }
+            }
+#if DEBUG_WITH_BOUNDING_BOX
             draw_rect_outline_raw(bw, bh, 0x00);
+#else
+            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, 0x00, x0, y0);
+#endif
             EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, false);
             last_sec = tm_now.tm_sec;
         }
