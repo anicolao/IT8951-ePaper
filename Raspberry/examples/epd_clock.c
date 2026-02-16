@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
     UDOUBLE roi_size = 0;
     int last_min = -1;
     int last_sec = -1;
-    const UBYTE sec_phase[3] = {0xC0, 0x00, 0xF0};
+    const UBYTE second_color = 0xC0;
 
     signal(SIGINT, signal_handler);
 
@@ -274,7 +274,6 @@ int main(int argc, char *argv[])
 
         if (tm_now.tm_sec != last_sec) {
             int prev_sec = (last_sec < 0) ? tm_now.tm_sec : last_sec;
-            UBYTE sec_color = sec_phase[tm_now.tm_sec % 3];
             UWORD cx = roi_w / 2, cy = roi_h / 2;
             UWORD xp, yp, xn, yn;
             int margin = 8;
@@ -304,8 +303,8 @@ int main(int argc, char *argv[])
             Paint_SelectImage(g_roi_buf);
             apply_mode(epd_mode);
             Paint_SetBitsPerPixel(4);
-            // One incremental update per second; color cycles light -> black -> white by second.
-            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, sec_color, x0, y0);
+            // One incremental update per second with a fixed light second hand.
+            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, second_color, x0, y0);
             EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, false, target_addr, true);
             last_sec = tm_now.tm_sec;
         }
