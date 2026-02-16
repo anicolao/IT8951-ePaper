@@ -259,6 +259,8 @@ int main(int argc, char *argv[])
     const UWORD sleep_exit_delay_ms = 500;
     int argi = 1;
     bool incremental_mode = false;
+    bool clear_enabled = true;
+    UWORD clear_mode = INIT_Mode;
     UWORD vcom = 0;
     int epd_mode = 0;
     UDOUBLE target_addr = 0;
@@ -283,14 +285,26 @@ int main(int argc, char *argv[])
 
     signal(SIGINT, signal_handler);
 
-    if (argi < argc && strcmp(argv[argi], "--incremental") == 0) {
-        incremental_mode = true;
+    while (argi < argc && strncmp(argv[argi], "--", 2) == 0) {
+        if (strcmp(argv[argi], "--incremental") == 0) {
+            incremental_mode = true;
+        } else if (strcmp(argv[argi], "--no-clear") == 0) {
+            clear_enabled = false;
+        } else if (strcmp(argv[argi], "--fast-clear") == 0) {
+            clear_enabled = true;
+            clear_mode = GC16_Mode;
+        } else {
+            Debug("Unknown option: %s\n", argv[argi]);
+            Debug("Usage: sudo ./epd_pgm [--incremental] [--no-clear|--fast-clear] <VCOM> <image.pgm> [mode]\n");
+            Debug("Example: sudo ./epd_pgm --incremental --fast-clear -2.51 ./pic/input.pgm 0\n");
+            return 1;
+        }
         argi++;
     }
 
     if ((argc - argi) < 2 || (argc - argi) > 3) {
-        Debug("Usage: sudo ./epd_pgm [--incremental] <VCOM> <image.pgm> [mode]\n");
-        Debug("Example: sudo ./epd_pgm --incremental -2.51 ./pic/input.pgm 0\n");
+        Debug("Usage: sudo ./epd_pgm [--incremental] [--no-clear|--fast-clear] <VCOM> <image.pgm> [mode]\n");
+        Debug("Example: sudo ./epd_pgm --incremental --fast-clear -2.51 ./pic/input.pgm 0\n");
         return 1;
     }
 
@@ -313,7 +327,11 @@ int main(int argc, char *argv[])
     init_end_s = monotonic_seconds();
 
     // Clear first to minimize ghosting from previously displayed content.
-    EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, INIT_Mode);
+    if (clear_enabled) {
+        EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, clear_mode);
+    } else {
+        Debug("Clear mode: skipped (--no-clear)\n");
+    }
     clear_end_s = monotonic_seconds();
 
     if (load_pgm_grayscale(argv[argi + 1], &img_pixels, &img_w, &img_h) != 0) {
