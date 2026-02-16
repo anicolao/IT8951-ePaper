@@ -14,6 +14,8 @@ static IT8951_Dev_Info g_dev_info = {0, 0};
 static UBYTE *g_full_buf = NULL;
 static UBYTE *g_face_buf = NULL;
 static UBYTE *g_roi_buf = NULL;
+static UBYTE *g_mono_full_buf = NULL;
+static UBYTE *g_mono_area_buf = NULL;
 
 static void cleanup_and_exit(int code)
 {
@@ -23,6 +25,8 @@ static void cleanup_and_exit(int code)
     }
     if (g_face_buf != NULL) { free(g_face_buf); g_face_buf = NULL; }
     if (g_roi_buf != NULL) { free(g_roi_buf); g_roi_buf = NULL; }
+    if (g_mono_full_buf != NULL) { free(g_mono_full_buf); g_mono_full_buf = NULL; }
+    if (g_mono_area_buf != NULL) { free(g_mono_area_buf); g_mono_area_buf = NULL; }
     if (g_dev_info.Panel_W != 0) {
         EPD_IT8951_Sleep();
     }
@@ -119,27 +123,39 @@ static void draw_second_hand(UWORD w, UWORD h, int sec, UBYTE color, int ox, int
     Paint_DrawCircle((UWORD)((int)cx - ox), (UWORD)((int)cy - oy), 3, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
 }
 
-static inline UBYTE get_4bpp_pixel(const UBYTE *buf, UWORD w, UWORD x, UWORD y)
+static void draw_clock_face_mono(UWORD w, UWORD h, struct tm *tm_now)
 {
-    UWORD wb = (w + 1) / 2;
-    UBYTE b = buf[(size_t)y * wb + x / 2];
-    UBYTE n = (x & 1) ? (b >> 4) : (b & 0x0F);
-    return (UBYTE)(n << 4);
-}
+    UWORD cx = w / 2;
+    UWORD cy = h / 2;
+    UWORD radius = (w < h ? w : h) / 2 - 16;
+    UWORD x2, y2;
 
-static inline void set_4bpp_pixel(UBYTE *buf, UWORD w, UWORD x, UWORD y, UBYTE gray)
-{
-    UWORD wb = (w + 1) / 2;
-    UBYTE *p = &buf[(size_t)y * wb + x / 2];
-    UBYTE n = (UBYTE)((gray >> 4) & 0x0F);
-    if (x & 1) {
-        *p = (UBYTE)((*p & 0x0F) | (n << 4));
-    } else {
-        *p = (UBYTE)((*p & 0xF0) | n);
+    Paint_Clear(WHITE);
+    Paint_DrawCircle(cx, cy, radius, 0x00, DOT_PIXEL_2X2, DRAW_FILL_EMPTY);
+
+    for (int i = 0; i < 60; i++) {
+        double a = (double)(i * 6 - 90);
+        UWORD r1 = radius - ((i % 5 == 0) ? 16 : 8);
+        UWORD r2 = radius - 2;
+        UWORD tx1, ty1, tx2, ty2;
+        hand_end(cx, cy, a, r1, &tx1, &ty1);
+        hand_end(cx, cy, a, r2, &tx2, &ty2);
+        Paint_DrawLine(tx1, ty1, tx2, ty2, 0x00, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
     }
+
+    {
+        double hour_deg = (((tm_now->tm_hour % 12) + tm_now->tm_min / 60.0) * 30.0) - 90.0;
+        double min_deg = ((tm_now->tm_min + tm_now->tm_sec / 60.0) * 6.0) - 90.0;
+        hand_end(cx, cy, hour_deg, radius * 55 / 100, &x2, &y2);
+        Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
+        hand_end(cx, cy, min_deg, radius * 75 / 100, &x2, &y2);
+        Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_2X2, LINE_STYLE_SOLID);
+    }
+
+    Paint_DrawCircle(cx, cy, 4, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
 }
 
-static void align_bbox_for_4bpp(int *x0, int *x1, int max_w)
+static void align_bbox_for_1bpp(int *x0, int *x1, int max_w)
 {
     int w = *x1 - *x0 + 1;
     int aw;
@@ -148,12 +164,12 @@ static void align_bbox_for_4bpp(int *x0, int *x1, int max_w)
     if (*x1 >= max_w) *x1 = max_w - 1;
 
     w = *x1 - *x0 + 1;
-    aw = (w + 3) & ~3; // width must be 4-pixel aligned for packed 4bpp writes
-    if (aw < 4) aw = 4;
-    if (aw > max_w) aw = max_w & ~3;
+    aw = (w + 31) & ~31;
+    if (aw < 32) aw = 32;
+    if (aw > max_w) aw = max_w & ~31;
     if (aw <= 0) aw = max_w;
 
-    *x0 &= ~3; // start X also 4-pixel aligned to avoid nibble/word ambiguity
+    *x0 &= ~31;
     if (*x0 < 0) *x0 = 0;
     if (*x0 + aw > max_w) {
         *x0 = max_w - aw;
@@ -161,17 +177,6 @@ static void align_bbox_for_4bpp(int *x0, int *x1, int max_w)
     }
     *x1 = *x0 + aw - 1;
     if (*x1 >= max_w) *x1 = max_w - 1;
-}
-
-static void copy_face_region_4bpp(const UBYTE *src, UWORD src_w, UBYTE *dst, UWORD dst_w,
-                                  UWORD sx, UWORD sy, UWORD w, UWORD h)
-{
-    for (UWORD y = 0; y < h; y++) {
-        for (UWORD x = 0; x < w; x++) {
-            UBYTE g = get_4bpp_pixel(src, src_w, sx + x, sy + y);
-            set_4bpp_pixel(dst, dst_w, x, y, g);
-        }
-    }
 }
 
 int main(int argc, char *argv[])
@@ -188,9 +193,10 @@ int main(int argc, char *argv[])
     UWORD roi_y = 0;
     UDOUBLE full_size = 0;
     UDOUBLE roi_size = 0;
+    UDOUBLE mono_full_size = 0;
     int last_min = -1;
     int last_sec = -1;
-    const UBYTE second_color = 0xC0;
+    const UBYTE second_color = 0x00;
 
     signal(SIGINT, signal_handler);
 
@@ -232,7 +238,10 @@ int main(int argc, char *argv[])
     roi_size = ((roi_w * 4 % 8 == 0) ? (roi_w * 4 / 8) : (roi_w * 4 / 8 + 1)) * roi_h;
     g_face_buf = (UBYTE *)malloc(roi_size);
     g_roi_buf = (UBYTE *)malloc(roi_size);
-    if (g_face_buf == NULL || g_roi_buf == NULL) {
+    mono_full_size = ((roi_w + 7) / 8) * roi_h;
+    g_mono_full_buf = (UBYTE *)malloc(mono_full_size);
+    g_mono_area_buf = (UBYTE *)malloc(mono_full_size);
+    if (g_face_buf == NULL || g_roi_buf == NULL || g_mono_full_buf == NULL || g_mono_area_buf == NULL) {
         Debug("Failed to allocate ROI buffer\n");
         cleanup_and_exit(1);
     }
@@ -293,19 +302,27 @@ int main(int argc, char *argv[])
             if (x1 >= (int)roi_w) x1 = (int)roi_w - 1;
             if (y1 >= (int)roi_h) y1 = (int)roi_h - 1;
 
-            align_bbox_for_4bpp(&x0, &x1, roi_w);
+            align_bbox_for_1bpp(&x0, &x1, roi_w);
             bw = (UWORD)(x1 - x0 + 1);
             bh = (UWORD)(y1 - y0 + 1);
 
-            // Destination is a compact bw x bh subimage; use bw as destination stride.
-            copy_face_region_4bpp(g_face_buf, roi_w, g_roi_buf, bw, (UWORD)x0, (UWORD)y0, bw, bh);
-            Paint_NewImage(g_roi_buf, bw, bh, 0, BLACK);
-            Paint_SelectImage(g_roi_buf);
+            Paint_NewImage(g_mono_full_buf, roi_w, roi_h, 0, BLACK);
+            Paint_SelectImage(g_mono_full_buf);
             apply_mode(epd_mode);
-            Paint_SetBitsPerPixel(4);
-            // One incremental update per second with a fixed light second hand.
-            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, second_color, x0, y0);
-            EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, false, target_addr, true);
+            Paint_SetBitsPerPixel(1);
+            draw_clock_face_mono(roi_w, roi_h, &tm_now);
+            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, second_color, 0, 0);
+
+            {
+                UWORD src_wb = (roi_w + 7) / 8;
+                UWORD dst_wb = (bw + 7) / 8;
+                for (UWORD yy = 0; yy < bh; yy++) {
+                    memcpy(g_mono_area_buf + (size_t)yy * dst_wb,
+                           g_mono_full_buf + (size_t)(y0 + yy) * src_wb + (x0 / 8),
+                           dst_wb);
+                }
+            }
+            EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, true);
             last_sec = tm_now.tm_sec;
         }
 
