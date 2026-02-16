@@ -14,7 +14,7 @@ static IT8951_Dev_Info g_dev_info = {0, 0};
 static UBYTE *g_full_buf = NULL;
 static UBYTE *g_face_buf = NULL;
 static UBYTE *g_roi_buf = NULL;
-static UBYTE *g_mono_full_buf = NULL;
+static UBYTE *g_mono_face_buf = NULL;
 static UBYTE *g_mono_area_buf = NULL;
 
 static void cleanup_and_exit(int code)
@@ -25,7 +25,7 @@ static void cleanup_and_exit(int code)
     }
     if (g_face_buf != NULL) { free(g_face_buf); g_face_buf = NULL; }
     if (g_roi_buf != NULL) { free(g_roi_buf); g_roi_buf = NULL; }
-    if (g_mono_full_buf != NULL) { free(g_mono_full_buf); g_mono_full_buf = NULL; }
+    if (g_mono_face_buf != NULL) { free(g_mono_face_buf); g_mono_face_buf = NULL; }
     if (g_mono_area_buf != NULL) { free(g_mono_area_buf); g_mono_area_buf = NULL; }
     if (g_dev_info.Panel_W != 0) {
         EPD_IT8951_Sleep();
@@ -91,7 +91,7 @@ static void draw_clock_face(UWORD w, UWORD h, struct tm *tm_now)
     }
 
     double hour_deg = (((tm_now->tm_hour % 12) + tm_now->tm_min / 60.0) * 30.0) - 90.0;
-    double min_deg = ((tm_now->tm_min + tm_now->tm_sec / 60.0) * 6.0) - 90.0;
+    double min_deg = (tm_now->tm_min * 6.0) - 90.0;
 
     hand_end(cx, cy, hour_deg, radius * 55 / 100, &x2, &y2);
     Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
@@ -145,7 +145,7 @@ static void draw_clock_face_mono(UWORD w, UWORD h, struct tm *tm_now)
 
     {
         double hour_deg = (((tm_now->tm_hour % 12) + tm_now->tm_min / 60.0) * 30.0) - 90.0;
-        double min_deg = ((tm_now->tm_min + tm_now->tm_sec / 60.0) * 6.0) - 90.0;
+        double min_deg = (tm_now->tm_min * 6.0) - 90.0;
         hand_end(cx, cy, hour_deg, radius * 55 / 100, &x2, &y2);
         Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
         hand_end(cx, cy, min_deg, radius * 75 / 100, &x2, &y2);
@@ -239,9 +239,9 @@ int main(int argc, char *argv[])
     g_face_buf = (UBYTE *)malloc(roi_size);
     g_roi_buf = (UBYTE *)malloc(roi_size);
     mono_full_size = ((roi_w + 7) / 8) * roi_h;
-    g_mono_full_buf = (UBYTE *)malloc(mono_full_size);
+    g_mono_face_buf = (UBYTE *)malloc(mono_full_size);
     g_mono_area_buf = (UBYTE *)malloc(mono_full_size);
-    if (g_face_buf == NULL || g_roi_buf == NULL || g_mono_full_buf == NULL || g_mono_area_buf == NULL) {
+    if (g_face_buf == NULL || g_roi_buf == NULL || g_mono_face_buf == NULL || g_mono_area_buf == NULL) {
         Debug("Failed to allocate ROI buffer\n");
         cleanup_and_exit(1);
     }
@@ -265,6 +265,13 @@ int main(int argc, char *argv[])
             apply_mode(epd_mode);
             Paint_SetBitsPerPixel(4);
             draw_clock_face(roi_w, roi_h, &tm_now);
+
+            // Build 1bpp cached face once per minute for low-flash second updates.
+            Paint_NewImage(g_mono_face_buf, roi_w, roi_h, 0, BLACK);
+            Paint_SelectImage(g_mono_face_buf);
+            apply_mode(epd_mode);
+            Paint_SetBitsPerPixel(1);
+            draw_clock_face_mono(roi_w, roi_h, &tm_now);
 
             memcpy(g_roi_buf, g_face_buf, (size_t)roi_size);
             Paint_NewImage(g_roi_buf, roi_w, roi_h, 0, BLACK);
@@ -306,22 +313,20 @@ int main(int argc, char *argv[])
             bw = (UWORD)(x1 - x0 + 1);
             bh = (UWORD)(y1 - y0 + 1);
 
-            Paint_NewImage(g_mono_full_buf, roi_w, roi_h, 0, BLACK);
-            Paint_SelectImage(g_mono_full_buf);
-            apply_mode(epd_mode);
-            Paint_SetBitsPerPixel(1);
-            draw_clock_face_mono(roi_w, roi_h, &tm_now);
-            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, second_color, 0, 0);
-
             {
                 UWORD src_wb = (roi_w + 7) / 8;
                 UWORD dst_wb = (bw + 7) / 8;
                 for (UWORD yy = 0; yy < bh; yy++) {
                     memcpy(g_mono_area_buf + (size_t)yy * dst_wb,
-                           g_mono_full_buf + (size_t)(y0 + yy) * src_wb + (x0 / 8),
+                           g_mono_face_buf + (size_t)(y0 + yy) * src_wb + (x0 / 8),
                            dst_wb);
                 }
             }
+            Paint_NewImage(g_mono_area_buf, bw, bh, 0, BLACK);
+            Paint_SelectImage(g_mono_area_buf);
+            apply_mode(epd_mode);
+            Paint_SetBitsPerPixel(1);
+            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, second_color, x0, y0);
             EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, true);
             last_sec = tm_now.tm_sec;
         }
