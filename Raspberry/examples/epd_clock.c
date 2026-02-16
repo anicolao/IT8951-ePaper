@@ -16,7 +16,7 @@
 
 // Periodic quality refresh cadence (minutes). Keeps ghosting under control.
 #ifndef CLOCK_FULL_REFRESH_PERIOD_MIN
-#define CLOCK_FULL_REFRESH_PERIOD_MIN 10
+#define CLOCK_FULL_REFRESH_PERIOD_MIN 1
 #endif
 
 static IT8951_Dev_Info g_dev_info = {0, 0};
