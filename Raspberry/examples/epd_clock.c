@@ -125,6 +125,21 @@ static void draw_second_hand(UWORD w, UWORD h, int sec, UBYTE color, int ox, int
     Paint_DrawCircle((UWORD)((int)cx - ox), (UWORD)((int)cy - oy), 3, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
 }
 
+static void draw_rect_outline_raw(UWORD w, UWORD h, UBYTE color)
+{
+    if (w == 0 || h == 0) {
+        return;
+    }
+    for (UWORD x = 0; x < w; x++) {
+        Paint_SetPixel(x, 0, color);
+        Paint_SetPixel(x, h - 1, color);
+    }
+    for (UWORD y = 0; y < h; y++) {
+        Paint_SetPixel(0, y, color);
+        Paint_SetPixel(w - 1, y, color);
+    }
+}
+
 static void draw_clock_face_mono(UWORD w, UWORD h, struct tm *tm_now)
 {
     UWORD cx = w / 2;
@@ -320,7 +335,7 @@ int main(int argc, char *argv[])
             Paint_SetBitsPerPixel(1);
             Paint_Clear(WHITE);
             // Debug mode: draw only the ROI bounding box outline so corruption location is obvious.
-            Paint_DrawRectangle(0, 0, bw - 1, bh - 1, 0x00, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
+            draw_rect_outline_raw(bw, bh, 0x00);
             EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, true);
             last_sec = tm_now.tm_sec;
         }
