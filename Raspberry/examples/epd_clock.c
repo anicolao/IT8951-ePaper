@@ -166,12 +166,12 @@ static void align_bbox_for_1bpp(int *x0, int *x1, int max_w)
     if (*x1 >= max_w) *x1 = max_w - 1;
 
     w = *x1 - *x0 + 1;
-    aw = (w + 7) & ~7;
-    if (aw < 8) aw = 8;
-    if (aw > max_w) aw = max_w & ~7;
+    aw = (w + 31) & ~31;
+    if (aw < 32) aw = 32;
+    if (aw > max_w) aw = max_w & ~31;
     if (aw <= 0) aw = max_w;
 
-    *x0 &= ~7;
+    *x0 &= ~31;
     if (*x0 < 0) *x0 = 0;
     if (*x0 + aw > max_w) {
         *x0 = max_w - aw;
