@@ -251,6 +251,7 @@ static UWORD effective_panel_width(UWORD panel_width, const char *lut_version)
 
 int main(int argc, char *argv[])
 {
+    const UWORD incremental_lines = 32;
     int argi = 1;
     bool incremental_mode = false;
     UWORD vcom = 0;
@@ -264,6 +265,7 @@ int main(int argc, char *argv[])
     UWORD img_w = 0;
     UWORD img_h = 0;
     UBYTE *img_pixels = NULL;
+    UBYTE *chunk_4bpp_buf = NULL;
     double temp_vcom = 0.0;
     double wall_start_s = 0.0;
     double wall_end_s = 0.0;
@@ -329,14 +331,44 @@ int main(int argc, char *argv[])
 
     update_start_s = monotonic_seconds();
     if (incremental_mode) {
-        Debug("Refresh mode: incremental scanline\n");
-        for (UWORD y = 0; y < draw_h; y++) {
-            EPD_IT8951_8bp_Refresh(g_tx_buf + (size_t)y * draw_w, 0, y, draw_w, 1, false, target_addr);
-            if (((y + 1) % 32 == 0) || (y + 1 == draw_h)) {
-                double pct = ((double)(y + 1) * 100.0) / (double)draw_h;
-                Debug("Progress: %u/%u lines (%.1f%%)\n", y + 1, draw_h, pct);
+        UWORD bytes_per_row_4bpp = (draw_w + 1) / 2;
+        size_t chunk_buf_size = (size_t)bytes_per_row_4bpp * incremental_lines;
+
+        Debug("Refresh mode: incremental 4bpp packed (%u lines/chunk)\n", incremental_lines);
+        chunk_4bpp_buf = (UBYTE *)malloc(chunk_buf_size);
+        if (chunk_4bpp_buf == NULL) {
+            Debug("Failed to allocate incremental chunk buffer\n");
+            free(img_pixels);
+            img_pixels = NULL;
+            free(g_tx_buf);
+            g_tx_buf = NULL;
+            cleanup_and_exit(1);
+        }
+
+        for (UWORD y0 = 0; y0 < draw_h; y0 += incremental_lines) {
+            UWORD chunk_h = (y0 + incremental_lines <= draw_h) ? incremental_lines : (draw_h - y0);
+
+            for (UWORD cy = 0; cy < chunk_h; cy++) {
+                UBYTE *dst_row = chunk_4bpp_buf + (size_t)cy * bytes_per_row_4bpp;
+                UBYTE *src_row = g_tx_buf + (size_t)(y0 + cy) * draw_w;
+
+                for (UWORD x = 0; x < draw_w; x += 2) {
+                    UBYTE even_gray = src_row[x] & 0xF0;
+                    UBYTE odd_gray = (x + 1 < draw_w) ? (src_row[x + 1] & 0xF0) : 0xF0;
+                    // Match GUI_Paint 4bpp packing: even pixel in low nibble, odd pixel in high nibble.
+                    dst_row[x / 2] = odd_gray | (even_gray >> 4);
+                }
+            }
+
+            EPD_IT8951_4bp_Refresh(chunk_4bpp_buf, 0, y0, draw_w, chunk_h, false, target_addr, true);
+            if (((y0 + chunk_h) % 32 == 0) || (y0 + chunk_h == draw_h)) {
+                double pct = ((double)(y0 + chunk_h) * 100.0) / (double)draw_h;
+                Debug("Progress: %u/%u lines (%.1f%%)\n", y0 + chunk_h, draw_h, pct);
             }
         }
+
+        free(chunk_4bpp_buf);
+        chunk_4bpp_buf = NULL;
     } else {
         Debug("Refresh mode: full frame\n");
         EPD_IT8951_8bp_Refresh(g_tx_buf, 0, 0, draw_w, draw_h, false, target_addr);

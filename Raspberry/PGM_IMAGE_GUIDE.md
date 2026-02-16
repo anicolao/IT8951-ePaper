@@ -108,7 +108,7 @@ Arguments:
 - `-2.51`: your panel VCOM value (from FPC label)
 - `./output.pgm`: input grayscale PGM file
 - `0`: display mode (optional; default `0`)
-- `--incremental`: optional; refresh one scan line at a time and print progress
+- `--incremental`: optional; refresh in incremental chunks (32 lines at a time, packed 4bpp) and print progress
 
 Notes:
 - Drawing starts at `(0,0)`.
