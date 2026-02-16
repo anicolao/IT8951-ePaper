@@ -14,6 +14,11 @@
 #define DEBUG_WITH_BOUNDING_BOX 0
 #endif
 
+// Periodic quality refresh cadence (minutes). Keeps ghosting under control.
+#ifndef CLOCK_FULL_REFRESH_PERIOD_MIN
+#define CLOCK_FULL_REFRESH_PERIOD_MIN 10
+#endif
+
 static IT8951_Dev_Info g_dev_info = {0, 0};
 static UBYTE *g_mono_panel_face_buf = NULL;
 static UBYTE *g_mono_area_buf = NULL;
@@ -217,6 +222,7 @@ int main(int argc, char *argv[])
     int last_hour = -1;
     int last_min = -1;
     int last_sec = -1;
+    int last_quality_refresh_key = -1;
 
     signal(SIGINT, signal_handler);
 
@@ -346,6 +352,21 @@ int main(int argc, char *argv[])
             last_hour = tm_now.tm_hour;
             last_min = tm_now.tm_min;
             last_sec = tm_now.tm_sec;
+
+            if (CLOCK_FULL_REFRESH_PERIOD_MIN > 0 && tm_now.tm_sec == 0 &&
+                (tm_now.tm_min % CLOCK_FULL_REFRESH_PERIOD_MIN) == 0) {
+                int refresh_key = tm_now.tm_hour * 60 + tm_now.tm_min;
+                if (refresh_key != last_quality_refresh_key) {
+                    struct timespec q0, q1;
+                    clock_gettime(CLOCK_MONOTONIC, &q0);
+                    EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(0, 0, panel_w, panel_h, GC16_Mode, base_addr);
+                    clock_gettime(CLOCK_MONOTONIC, &q1);
+                    last_quality_refresh_key = refresh_key;
+                    Debug("Quality full refresh at %02d:%02d:%02d took %.3fs (period=%d min)\n",
+                          tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec,
+                          elapsed_seconds(&q0, &q1), CLOCK_FULL_REFRESH_PERIOD_MIN);
+                }
+            }
         }
 
         DEV_Delay_ms(20);
