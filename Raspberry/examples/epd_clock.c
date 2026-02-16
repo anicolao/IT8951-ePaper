@@ -15,21 +15,12 @@
 #endif
 
 static IT8951_Dev_Info g_dev_info = {0, 0};
-static UBYTE *g_full_buf = NULL;
-static UBYTE *g_face_buf = NULL;
-static UBYTE *g_roi_buf = NULL;
-static UBYTE *g_mono_face_buf = NULL;
+static UBYTE *g_mono_panel_face_buf = NULL;
 static UBYTE *g_mono_area_buf = NULL;
 
 static void cleanup_and_exit(int code)
 {
-    if (g_full_buf != NULL) {
-        free(g_full_buf);
-        g_full_buf = NULL;
-    }
-    if (g_face_buf != NULL) { free(g_face_buf); g_face_buf = NULL; }
-    if (g_roi_buf != NULL) { free(g_roi_buf); g_roi_buf = NULL; }
-    if (g_mono_face_buf != NULL) { free(g_mono_face_buf); g_mono_face_buf = NULL; }
+    if (g_mono_panel_face_buf != NULL) { free(g_mono_panel_face_buf); g_mono_panel_face_buf = NULL; }
     if (g_mono_area_buf != NULL) { free(g_mono_area_buf); g_mono_area_buf = NULL; }
     if (g_dev_info.Panel_W != 0) {
         EPD_IT8951_Sleep();
@@ -176,6 +167,11 @@ static void draw_clock_face_mono(UWORD w, UWORD h, struct tm *tm_now)
     Paint_DrawCircle(cx, cy, 4, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
 }
 
+static double elapsed_seconds(const struct timespec *a, const struct timespec *b)
+{
+    return (double)(b->tv_sec - a->tv_sec) + ((double)(b->tv_nsec - a->tv_nsec) / 1e9);
+}
+
 static void align_bbox_for_1bpp(int *x0, int *x1, int max_w)
 {
     if (*x0 < 0) *x0 = 0;
@@ -218,9 +214,9 @@ int main(int argc, char *argv[])
     UWORD roi_h = 0;
     UWORD roi_x = 0;
     UWORD roi_y = 0;
-    UDOUBLE full_size = 0;
-    UDOUBLE roi_size = 0;
-    UDOUBLE mono_full_size = 0;
+    UDOUBLE mono_panel_size = 0;
+    UDOUBLE mono_roi_size = 0;
+    UDOUBLE base_addr = 0;
     int last_min = -1;
     int last_sec = -1;
 
@@ -246,35 +242,21 @@ int main(int argc, char *argv[])
     panel_w = effective_panel_width(g_dev_info.Panel_W, (const char *)g_dev_info.LUT_Version);
     panel_h = g_dev_info.Panel_H;
     target_addr = g_dev_info.Memory_Addr_L | (g_dev_info.Memory_Addr_H << 16);
+    base_addr = target_addr;
 
-    full_size = ((panel_w * 4 % 8 == 0) ? (panel_w * 4 / 8) : (panel_w * 4 / 8 + 1)) * panel_h;
-    g_full_buf = (UBYTE *)malloc(full_size);
-    if (g_full_buf == NULL) {
-        Debug("Failed to allocate full frame buffer\n");
-        cleanup_and_exit(1);
-    }
+    // For second-hand updates we now compute ROIs directly on full-panel coordinates.
+    roi_x = 0;
+    roi_y = 0;
+    roi_w = panel_w;
+    roi_h = panel_h;
 
-    roi_w = (panel_w * 8) / 10;
-    roi_h = (panel_h * 8) / 10;
-    roi_w = roi_w - (roi_w % 32);
-    roi_h = roi_h - (roi_h % 2);
-    roi_x = (panel_w - roi_w) / 2;
-    roi_y = (panel_h - roi_h) / 2;
-    // Keep ROI X aligned for 1bpp absolute-address updates (X/8 path in IT8951).
-    roi_x &= ~31;
-    if (roi_x + roi_w > panel_w) {
-        roi_w = panel_w - roi_x;
-        roi_w = roi_w - (roi_w % 32);
-    }
+    mono_panel_size = ((panel_w + 7) / 8) * panel_h;
+    mono_roi_size = ((roi_w + 7) / 8) * roi_h;
 
-    roi_size = ((roi_w * 4 % 8 == 0) ? (roi_w * 4 / 8) : (roi_w * 4 / 8 + 1)) * roi_h;
-    g_face_buf = (UBYTE *)malloc(roi_size);
-    g_roi_buf = (UBYTE *)malloc(roi_size);
-    mono_full_size = ((roi_w + 7) / 8) * roi_h;
-    g_mono_face_buf = (UBYTE *)malloc(mono_full_size);
-    g_mono_area_buf = (UBYTE *)malloc(mono_full_size);
-    if (g_face_buf == NULL || g_roi_buf == NULL || g_mono_face_buf == NULL || g_mono_area_buf == NULL) {
-        Debug("Failed to allocate ROI buffer\n");
+    g_mono_panel_face_buf = (UBYTE *)malloc(mono_panel_size);
+    g_mono_area_buf = (UBYTE *)malloc(mono_roi_size);
+    if (g_mono_panel_face_buf == NULL || g_mono_area_buf == NULL) {
+        Debug("Failed to allocate clock buffers\n");
         cleanup_and_exit(1);
     }
 
@@ -286,30 +268,21 @@ int main(int argc, char *argv[])
         localtime_r(&t, &tm_now);
 
         if (tm_now.tm_min != last_min) {
-            Paint_NewImage(g_full_buf, panel_w, panel_h, 0, BLACK);
-            Paint_SelectImage(g_full_buf);
-            apply_mode(epd_mode);
-            Paint_SetBitsPerPixel(4);
-            Paint_Clear(WHITE);
+            struct timespec t0, t1, t2, t3;
+            clock_gettime(CLOCK_MONOTONIC, &t0);
 
-            Paint_NewImage(g_face_buf, roi_w, roi_h, 0, BLACK);
-            Paint_SelectImage(g_face_buf);
-            apply_mode(epd_mode);
-            Paint_SetBitsPerPixel(4);
-            draw_clock_face(roi_w, roi_h, &tm_now);
-
-            // Build 1bpp cached face once per minute for low-flash second updates.
-            Paint_NewImage(g_mono_face_buf, roi_w, roi_h, 0, BLACK);
-            Paint_SelectImage(g_mono_face_buf);
+            Paint_NewImage(g_mono_panel_face_buf, panel_w, panel_h, 0, BLACK);
+            Paint_SelectImage(g_mono_panel_face_buf);
             apply_mode(epd_mode);
             Paint_SetBitsPerPixel(1);
-            draw_clock_face_mono(roi_w, roi_h, &tm_now);
+            draw_clock_face_mono(panel_w, panel_h, &tm_now);
+            clock_gettime(CLOCK_MONOTONIC, &t1);
 
-            // Full minute refresh draws only static clock face.
-            memcpy(g_roi_buf, g_face_buf, (size_t)roi_size);
+            EPD_IT8951_1bp_Multi_Frame_Write(g_mono_panel_face_buf, 0, 0, panel_w, panel_h, base_addr, false);
+            clock_gettime(CLOCK_MONOTONIC, &t2);
 
-            EPD_IT8951_4bp_Refresh(g_full_buf, 0, 0, panel_w, panel_h, false, target_addr, true);
-            EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x, roi_y, roi_w, roi_h, false, target_addr, true);
+            EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(0, 0, panel_w, panel_h, GC16_Mode, base_addr);
+            clock_gettime(CLOCK_MONOTONIC, &t3);
 
             // Re-sample time after slow full refresh so second-hand updates stay in sync.
             {
@@ -322,6 +295,11 @@ int main(int argc, char *argv[])
                 Debug("Minute refresh at %02d:%02d complete (now %02d:%02d:%02d)\n",
                       tm_now.tm_hour, tm_now.tm_min,
                       tm_after.tm_hour, tm_after.tm_min, tm_after.tm_sec);
+                Debug("Minute timings: compose=%.3fs write=%.3fs refresh=%.3fs total=%.3fs\n",
+                      elapsed_seconds(&t0, &t1),
+                      elapsed_seconds(&t1, &t2),
+                      elapsed_seconds(&t2, &t3),
+                      elapsed_seconds(&t0, &t3));
             }
         }
 
@@ -364,11 +342,11 @@ int main(int argc, char *argv[])
             Paint_SetBitsPerPixel(1);
             // Start from cached 1bpp clock face for this minute, then overlay second hand.
             {
-                UWORD src_stride = (roi_w + 7) / 8;
+                UWORD src_stride = (panel_w + 7) / 8;
                 UWORD dst_stride = (bw + 7) / 8;
                 for (UWORD ry = 0; ry < bh; ry++) {
                     memcpy(g_mono_area_buf + (ry * dst_stride),
-                           g_mono_face_buf + (((UWORD)y0 + ry) * src_stride) + ((UWORD)x0 / 8),
+                           g_mono_panel_face_buf + (((roi_y + (UWORD)y0 + ry) * src_stride)) + ((roi_x + (UWORD)x0) / 8),
                            dst_stride);
                 }
             }

@@ -811,6 +811,13 @@ void EPD_IT8951_1bp_Multi_Frame_Refresh(UWORD X, UWORD Y, UWORD W, UWORD H,UDOUB
     EPD_IT8951_Display_1bp(X,Y,W,H, A2_Mode,Target_Memory_Addr,0xF0,0x00);
 }
 
+void EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(UWORD X, UWORD Y, UWORD W, UWORD H, UBYTE Mode, UDOUBLE Target_Memory_Addr)
+{
+    EPD_IT8951_WaitForDisplayReady();
+
+    EPD_IT8951_Display_1bp(X, Y, W, H, Mode, Target_Memory_Addr, 0xF0, 0x00);
+}
+
 
 
 
