@@ -1,6 +1,5 @@
 #include "../lib/Config/DEV_Config.h"
 #include "../lib/e-Paper/EPD_IT8951.h"
-#include "../lib/GUI/GUI_Paint.h"
 
 #include <math.h>
 #include <signal.h>
@@ -10,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static UBYTE *g_tx_buf = NULL;
 static IT8951_Dev_Info g_dev_info = {0, 0};
 
 static double monotonic_seconds(void)
@@ -29,11 +27,6 @@ static void wait_for_display_ready(void)
 
 static void cleanup_and_exit(int code)
 {
-    if (g_tx_buf != NULL) {
-        free(g_tx_buf);
-        g_tx_buf = NULL;
-    }
-
     DEV_Module_Exit();
     exit(code);
 }
@@ -230,17 +223,6 @@ static int load_pgm_grayscale(const char *path, UBYTE **pixels, UWORD *width, UW
     return 0;
 }
 
-static void set_display_mode(int mode)
-{
-    if (mode == 1 || mode == 2) {
-        Paint_SetRotate(ROTATE_0);
-        Paint_SetMirroring(MIRROR_HORIZONTAL);
-    } else {
-        Paint_SetRotate(ROTATE_0);
-        Paint_SetMirroring(MIRROR_NONE);
-    }
-}
-
 static UWORD effective_panel_width(UWORD panel_width, const char *lut_version)
 {
     if (strcmp(lut_version, "M641") == 0 || strcmp(lut_version, "M841_TFAB512") == 0) {
@@ -272,14 +254,13 @@ static void pack_gray8_rows_to_4bpp(
 int main(int argc, char *argv[])
 {
     const UWORD incremental_lines = 32;
-    const UWORD full_settle_ms = 4500;
+    const UWORD full_settle_ms = 1500;
     const UWORD incremental_settle_ms = 0;
     const UWORD sleep_exit_delay_ms = 500;
     int argi = 1;
     bool incremental_mode = false;
     UWORD vcom = 0;
     int epd_mode = 0;
-    UDOUBLE tx_size = 0;
     UDOUBLE target_addr = 0;
     UWORD panel_w = 0;
     UWORD panel_h = 0;
@@ -295,6 +276,10 @@ int main(int argc, char *argv[])
     double wall_end_s = 0.0;
     double update_start_s = 0.0;
     double update_end_s = 0.0;
+    double init_end_s = 0.0;
+    double clear_end_s = 0.0;
+    double load_end_s = 0.0;
+    double prep_end_s = 0.0;
 
     signal(SIGINT, signal_handler);
 
@@ -325,33 +310,25 @@ int main(int argc, char *argv[])
     panel_w = effective_panel_width(g_dev_info.Panel_W, (const char *)g_dev_info.LUT_Version);
     panel_h = g_dev_info.Panel_H;
     target_addr = g_dev_info.Memory_Addr_L | (g_dev_info.Memory_Addr_H << 16);
+    init_end_s = monotonic_seconds();
 
     // Clear first to minimize ghosting from previously displayed content.
     EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, INIT_Mode);
+    clear_end_s = monotonic_seconds();
 
     if (load_pgm_grayscale(argv[argi + 1], &img_pixels, &img_w, &img_h) != 0) {
         cleanup_and_exit(1);
     }
+    load_end_s = monotonic_seconds();
     Debug("Loaded PGM: %ux%u\n", img_w, img_h);
 
     draw_w = (img_w < panel_w) ? img_w : panel_w;
     draw_h = (img_h < panel_h) ? img_h : panel_h;
     Debug("Panel: %ux%u, draw area: %ux%u at (0,0)\n", panel_w, panel_h, draw_w, draw_h);
-
-    tx_size = (UDOUBLE)draw_w * draw_h;
-    g_tx_buf = (UBYTE *)malloc(tx_size);
-    if (g_tx_buf == NULL) {
-        free(img_pixels);
-        Debug("Failed to allocate transfer buffer\n");
-        cleanup_and_exit(1);
+    prep_end_s = monotonic_seconds();
+    if (epd_mode != 0) {
+        Debug("Note: mode %d currently has no effect in direct PGM path\n", epd_mode);
     }
-
-    for (UWORD y = 0; y < draw_h; y++) {
-        memcpy(g_tx_buf + (size_t)y * draw_w, img_pixels + (size_t)y * img_w, draw_w);
-    }
-
-    // Keep mode behavior consistent with other examples.
-    set_display_mode(epd_mode);
 
     update_start_s = monotonic_seconds();
     if (incremental_mode) {
@@ -364,15 +341,13 @@ int main(int argc, char *argv[])
             Debug("Failed to allocate incremental chunk buffer\n");
             free(img_pixels);
             img_pixels = NULL;
-            free(g_tx_buf);
-            g_tx_buf = NULL;
             cleanup_and_exit(1);
         }
 
         for (UWORD y0 = 0; y0 < draw_h; y0 += incremental_lines) {
             UWORD chunk_h = (y0 + incremental_lines <= draw_h) ? incremental_lines : (draw_h - y0);
 
-            pack_gray8_rows_to_4bpp(g_tx_buf + (size_t)y0 * draw_w, draw_w, chunk_4bpp_buf, draw_w, chunk_h);
+            pack_gray8_rows_to_4bpp(img_pixels + (size_t)y0 * img_w, img_w, chunk_4bpp_buf, draw_w, chunk_h);
 
             EPD_IT8951_4bp_Refresh(chunk_4bpp_buf, 0, y0, draw_w, chunk_h, false, target_addr, true);
             if (((y0 + chunk_h) % 32 == 0) || (y0 + chunk_h == draw_h)) {
@@ -393,12 +368,10 @@ int main(int argc, char *argv[])
             Debug("Failed to allocate full-frame 4bpp buffer\n");
             free(img_pixels);
             img_pixels = NULL;
-            free(g_tx_buf);
-            g_tx_buf = NULL;
             cleanup_and_exit(1);
         }
 
-        pack_gray8_rows_to_4bpp(g_tx_buf, draw_w, full_4bpp_buf, draw_w, draw_h);
+        pack_gray8_rows_to_4bpp(img_pixels, img_w, full_4bpp_buf, draw_w, draw_h);
         EPD_IT8951_4bp_Refresh(full_4bpp_buf, 0, 0, draw_w, draw_h, false, target_addr, true);
         free(full_4bpp_buf);
         full_4bpp_buf = NULL;
@@ -411,10 +384,12 @@ int main(int argc, char *argv[])
 
     free(img_pixels);
     img_pixels = NULL;
-    free(g_tx_buf);
-    g_tx_buf = NULL;
 
     wall_end_s = monotonic_seconds();
+    Debug("Init time: %.3f seconds\n", init_end_s - wall_start_s);
+    Debug("Clear time: %.3f seconds\n", clear_end_s - init_end_s);
+    Debug("PGM load time: %.3f seconds\n", load_end_s - clear_end_s);
+    Debug("Pre-update prep time: %.3f seconds\n", prep_end_s - load_end_s);
     Debug("Image update time: %.3f seconds\n", update_end_s - update_start_s);
     Debug("Total wall clock (init->finish): %.3f seconds\n", wall_end_s - wall_start_s);
 
