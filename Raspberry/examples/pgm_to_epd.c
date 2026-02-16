@@ -272,7 +272,7 @@ static void pack_gray8_rows_to_4bpp(
 int main(int argc, char *argv[])
 {
     const UWORD incremental_lines = 32;
-    const UWORD full_settle_ms = 1500;
+    const UWORD full_settle_ms = 4500;
     const UWORD incremental_settle_ms = 0;
     const UWORD sleep_exit_delay_ms = 500;
     int argi = 1;
