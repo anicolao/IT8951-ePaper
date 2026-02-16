@@ -249,9 +249,32 @@ static UWORD effective_panel_width(UWORD panel_width, const char *lut_version)
     return panel_width;
 }
 
+static void pack_gray8_rows_to_4bpp(
+    const UBYTE *src_gray8,
+    UWORD src_stride,
+    UBYTE *dst_4bpp,
+    UWORD width,
+    UWORD rows)
+{
+    UWORD bytes_per_row_4bpp = (width + 1) / 2;
+    for (UWORD y = 0; y < rows; y++) {
+        const UBYTE *src_row = src_gray8 + (size_t)y * src_stride;
+        UBYTE *dst_row = dst_4bpp + (size_t)y * bytes_per_row_4bpp;
+        for (UWORD x = 0; x < width; x += 2) {
+            UBYTE even_gray = src_row[x] & 0xF0;
+            UBYTE odd_gray = (x + 1 < width) ? (src_row[x + 1] & 0xF0) : 0xF0;
+            // Match GUI_Paint 4bpp packing: even pixel in low nibble, odd pixel in high nibble.
+            dst_row[x / 2] = odd_gray | (even_gray >> 4);
+        }
+    }
+}
+
 int main(int argc, char *argv[])
 {
     const UWORD incremental_lines = 32;
+    const UWORD full_settle_ms = 1500;
+    const UWORD incremental_settle_ms = 0;
+    const UWORD sleep_exit_delay_ms = 500;
     int argi = 1;
     bool incremental_mode = false;
     UWORD vcom = 0;
@@ -265,6 +288,7 @@ int main(int argc, char *argv[])
     UWORD img_w = 0;
     UWORD img_h = 0;
     UBYTE *img_pixels = NULL;
+    UBYTE *full_4bpp_buf = NULL;
     UBYTE *chunk_4bpp_buf = NULL;
     double temp_vcom = 0.0;
     double wall_start_s = 0.0;
@@ -348,17 +372,7 @@ int main(int argc, char *argv[])
         for (UWORD y0 = 0; y0 < draw_h; y0 += incremental_lines) {
             UWORD chunk_h = (y0 + incremental_lines <= draw_h) ? incremental_lines : (draw_h - y0);
 
-            for (UWORD cy = 0; cy < chunk_h; cy++) {
-                UBYTE *dst_row = chunk_4bpp_buf + (size_t)cy * bytes_per_row_4bpp;
-                UBYTE *src_row = g_tx_buf + (size_t)(y0 + cy) * draw_w;
-
-                for (UWORD x = 0; x < draw_w; x += 2) {
-                    UBYTE even_gray = src_row[x] & 0xF0;
-                    UBYTE odd_gray = (x + 1 < draw_w) ? (src_row[x + 1] & 0xF0) : 0xF0;
-                    // Match GUI_Paint 4bpp packing: even pixel in low nibble, odd pixel in high nibble.
-                    dst_row[x / 2] = odd_gray | (even_gray >> 4);
-                }
-            }
+            pack_gray8_rows_to_4bpp(g_tx_buf + (size_t)y0 * draw_w, draw_w, chunk_4bpp_buf, draw_w, chunk_h);
 
             EPD_IT8951_4bp_Refresh(chunk_4bpp_buf, 0, y0, draw_w, chunk_h, false, target_addr, true);
             if (((y0 + chunk_h) % 32 == 0) || (y0 + chunk_h == draw_h)) {
@@ -370,13 +384,29 @@ int main(int argc, char *argv[])
         free(chunk_4bpp_buf);
         chunk_4bpp_buf = NULL;
     } else {
-        Debug("Refresh mode: full frame\n");
-        EPD_IT8951_8bp_Refresh(g_tx_buf, 0, 0, draw_w, draw_h, false, target_addr);
+        UWORD bytes_per_row_4bpp = (draw_w + 1) / 2;
+        size_t full_buf_size = (size_t)bytes_per_row_4bpp * draw_h;
+
+        Debug("Refresh mode: full frame packed 4bpp\n");
+        full_4bpp_buf = (UBYTE *)malloc(full_buf_size);
+        if (full_4bpp_buf == NULL) {
+            Debug("Failed to allocate full-frame 4bpp buffer\n");
+            free(img_pixels);
+            img_pixels = NULL;
+            free(g_tx_buf);
+            g_tx_buf = NULL;
+            cleanup_and_exit(1);
+        }
+
+        pack_gray8_rows_to_4bpp(g_tx_buf, draw_w, full_4bpp_buf, draw_w, draw_h);
+        EPD_IT8951_4bp_Refresh(full_4bpp_buf, 0, 0, draw_w, draw_h, false, target_addr, true);
+        free(full_4bpp_buf);
+        full_4bpp_buf = NULL;
     }
 
     // Ensure display update completes on panel before exiting module I/O.
     wait_for_display_ready();
-    DEV_Delay_ms(12000);
+    DEV_Delay_ms(incremental_mode ? incremental_settle_ms : full_settle_ms);
     update_end_s = monotonic_seconds();
 
     free(img_pixels);
@@ -389,7 +419,7 @@ int main(int argc, char *argv[])
     Debug("Total wall clock (init->finish): %.3f seconds\n", wall_end_s - wall_start_s);
 
     EPD_IT8951_Sleep();
-    DEV_Delay_ms(5000);
+    DEV_Delay_ms(sleep_exit_delay_ms);
     DEV_Module_Exit();
     return 0;
 }
