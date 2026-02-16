@@ -178,21 +178,25 @@ static void align_bbox_for_1bpp(int *x0, int *x1, int max_w)
     if (*x1 >= max_w) *x1 = max_w - 1;
     if (*x1 < *x0) *x1 = *x0;
 
-    // 1bpp writes are addressed as X/8, W/8, so ROI must be byte aligned.
+    // 1bpp writes are addressed as X/8, W/8.
+    // The vendor write path packs by 16-bit words, so keep width at 16-pixel multiples.
     *x0 &= ~7;
     if (*x0 < 0) *x0 = 0;
-    *x1 = ((*x1 + 1 + 7) & ~7) - 1;
+    *x1 = ((*x1 + 1 + 15) & ~15) - 1;
     if (*x1 >= max_w) *x1 = max_w - 1;
 
-    // Enforce W multiple of 8 after right-edge clamp.
-    if (((*x1 - *x0 + 1) & 7) != 0) {
-        *x1 = *x0 + (((*x1 - *x0 + 1) + 7) & ~7) - 1;
+    // Enforce W multiple of 16 after right-edge clamp.
+    if (((*x1 - *x0 + 1) & 15) != 0) {
+        *x1 = *x0 + (((*x1 - *x0 + 1) + 15) & ~15) - 1;
         if (*x1 >= max_w) {
             *x1 = max_w - 1;
-            *x0 = *x1 - (((*x1 - *x0 + 1) & ~7) ? ((*x1 - *x0 + 1) & ~7) : 8) + 1;
-            if (*x0 < 0) *x0 = 0;
+            while (((*x1 - *x0 + 1) & 15) != 0 && *x0 >= 16) {
+                *x0 -= 8;
+            }
             *x0 &= ~7;
-            *x1 = *x0 + (((*x1 - *x0 + 1) + 7) & ~7) - 1;
+            if (*x0 < 0) *x0 = 0;
+            if (*x1 < *x0) *x1 = *x0;
+            *x1 = *x0 + (((*x1 - *x0 + 1) + 15) & ~15) - 1;
             if (*x1 >= max_w) *x1 = max_w - 1;
         }
     }
@@ -248,7 +252,7 @@ int main(int argc, char *argv[])
 
     roi_w = (panel_w * 8) / 10;
     roi_h = (panel_h * 8) / 10;
-    roi_w = roi_w - (roi_w % 8);
+    roi_w = roi_w - (roi_w % 16);
     roi_h = roi_h - (roi_h % 2);
     roi_x = (panel_w - roi_w) / 2;
     roi_y = (panel_h - roi_h) / 2;
@@ -256,7 +260,7 @@ int main(int argc, char *argv[])
     roi_x &= ~7;
     if (roi_x + roi_w > panel_w) {
         roi_w = panel_w - roi_x;
-        roi_w = roi_w - (roi_w % 8);
+        roi_w = roi_w - (roi_w % 16);
     }
 
     roi_size = ((roi_w * 4 % 8 == 0) ? (roi_w * 4 / 8) : (roi_w * 4 / 8 + 1)) * roi_h;
