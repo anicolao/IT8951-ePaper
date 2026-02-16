@@ -305,19 +305,24 @@ int main(int argc, char *argv[])
             Paint_SetBitsPerPixel(1);
             draw_clock_face_mono(roi_w, roi_h, &tm_now);
 
+            // Full minute refresh draws only static clock face.
             memcpy(g_roi_buf, g_face_buf, (size_t)roi_size);
-            Paint_NewImage(g_roi_buf, roi_w, roi_h, 0, BLACK);
-            Paint_SelectImage(g_roi_buf);
-            apply_mode(epd_mode);
-            Paint_SetBitsPerPixel(4);
-            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, 0x00, 0, 0);
 
             EPD_IT8951_4bp_Refresh(g_full_buf, 0, 0, panel_w, panel_h, false, target_addr, true);
             EPD_IT8951_4bp_Refresh(g_roi_buf, roi_x, roi_y, roi_w, roi_h, false, target_addr, true);
 
-            last_min = tm_now.tm_min;
-            last_sec = tm_now.tm_sec;
-            Debug("Minute refresh at %02d:%02d\n", tm_now.tm_hour, tm_now.tm_min);
+            // Re-sample time after slow full refresh so second-hand updates stay in sync.
+            {
+                time_t t_after = time(NULL);
+                struct tm tm_after;
+                localtime_r(&t_after, &tm_after);
+                last_min = tm_after.tm_min;
+                // Force immediate ROI second-hand update on next loop using current second.
+                last_sec = -1;
+                Debug("Minute refresh at %02d:%02d complete (now %02d:%02d:%02d)\n",
+                      tm_now.tm_hour, tm_now.tm_min,
+                      tm_after.tm_hour, tm_after.tm_min, tm_after.tm_sec);
+            }
         }
 
         if (tm_now.tm_sec != last_sec) {
