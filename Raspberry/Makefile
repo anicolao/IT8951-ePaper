@@ -9,13 +9,16 @@ DIR_BIN      = ./bin
 COMMON_C = $(wildcard ${DIR_Config}/*.c ${DIR_EPD}/*.c ${DIR_FONTS}/*.c ${DIR_GUI}/*.c)
 EPD_C = ${DIR_Examples}/example.c ${DIR_Examples}/main.c
 PGM_C = ${DIR_Examples}/pgm_to_epd.c
+CLOCK_C = ${DIR_Examples}/epd_clock.c
 
 COMMON_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${COMMON_C}))
 EPD_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${EPD_C}))
 PGM_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${PGM_C}))
+CLOCK_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${CLOCK_C}))
 
 TARGET = epd
 TARGET_PGM = epd_pgm
+TARGET_CLOCK = epd_clock
 
 CC = gcc
 
@@ -42,12 +45,15 @@ endif
 
 $(shell mkdir -p $(DIR_BIN))
 
-all: ${TARGET} ${TARGET_PGM}
+all: ${TARGET} ${TARGET_PGM} ${TARGET_CLOCK}
 
 ${TARGET}: ${COMMON_O} ${EPD_O}
 	$(CC) $(CFLAGS) $^ -o $@ $(LIB_USE)
 
 ${TARGET_PGM}: ${COMMON_O} ${PGM_O}
+	$(CC) $(CFLAGS) $^ -o $@ $(LIB_USE)
+
+${TARGET_CLOCK}: ${COMMON_O} ${CLOCK_O}
 	$(CC) $(CFLAGS) $^ -o $@ $(LIB_USE)
 
 ${DIR_BIN}/%.o: ${DIR_Config}/%.c
@@ -69,8 +75,8 @@ ${DIR_BIN}/%.d: ${DIR_Config}/%.c
 	@set -e; rm -f $@; \
 	$(CC) -MM $(CFLAGS) $< | sed 's,^,$(DIR_BIN)/,' > $@
 
-DEP_C = ${COMMON_C} ${EPD_C} ${PGM_C}
+DEP_C = ${COMMON_C} ${EPD_C} ${PGM_C} ${CLOCK_C}
 -include $(patsubst %.c,${DIR_BIN}/%.d,$(notdir ${DEP_C}))
 
 clean:
-	rm -rf $(DIR_BIN)/* $(TARGET) $(TARGET_PGM)
+	rm -rf $(DIR_BIN)/* $(TARGET) $(TARGET_PGM) $(TARGET_CLOCK)
