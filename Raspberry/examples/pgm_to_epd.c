@@ -5,12 +5,27 @@
 #include <math.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static UBYTE *g_tx_buf = NULL;
 static IT8951_Dev_Info g_dev_info = {0, 0};
+
+static double monotonic_seconds(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
+}
+
+static void wait_for_display_ready(void)
+{
+    while (DEV_Digital_Read(EPD_BUSY_PIN) == 0) {
+        DEV_Delay_ms(1);
+    }
+}
 
 static void cleanup_and_exit(int code)
 {
@@ -236,6 +251,8 @@ static UWORD effective_panel_width(UWORD panel_width, const char *lut_version)
 
 int main(int argc, char *argv[])
 {
+    int argi = 1;
+    bool incremental_mode = false;
     UWORD vcom = 0;
     int epd_mode = 0;
     UDOUBLE tx_size = 0;
@@ -248,23 +265,34 @@ int main(int argc, char *argv[])
     UWORD img_h = 0;
     UBYTE *img_pixels = NULL;
     double temp_vcom = 0.0;
+    double wall_start_s = 0.0;
+    double wall_end_s = 0.0;
+    double update_start_s = 0.0;
+    double update_end_s = 0.0;
 
     signal(SIGINT, signal_handler);
 
-    if (argc < 3 || argc > 4) {
-        Debug("Usage: sudo ./epd_pgm <VCOM> <image.pgm> [mode]\n");
-        Debug("Example: sudo ./epd_pgm -2.51 ./pic/input.pgm 0\n");
+    if (argi < argc && strcmp(argv[argi], "--incremental") == 0) {
+        incremental_mode = true;
+        argi++;
+    }
+
+    if ((argc - argi) < 2 || (argc - argi) > 3) {
+        Debug("Usage: sudo ./epd_pgm [--incremental] <VCOM> <image.pgm> [mode]\n");
+        Debug("Example: sudo ./epd_pgm --incremental -2.51 ./pic/input.pgm 0\n");
         return 1;
     }
+
+    wall_start_s = monotonic_seconds();
 
     if (DEV_Module_Init() != 0) {
         return 1;
     }
 
-    sscanf(argv[1], "%lf", &temp_vcom);
+    sscanf(argv[argi], "%lf", &temp_vcom);
     vcom = (UWORD)(fabs(temp_vcom) * 1000);
-    if (argc == 4) {
-        epd_mode = atoi(argv[3]);
+    if ((argc - argi) == 3) {
+        epd_mode = atoi(argv[argi + 2]);
     }
 
     g_dev_info = EPD_IT8951_Init(vcom);
@@ -275,7 +303,7 @@ int main(int argc, char *argv[])
     // Clear first to minimize ghosting from previously displayed content.
     EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, INIT_Mode);
 
-    if (load_pgm_grayscale(argv[2], &img_pixels, &img_w, &img_h) != 0) {
+    if (load_pgm_grayscale(argv[argi + 1], &img_pixels, &img_w, &img_h) != 0) {
         cleanup_and_exit(1);
     }
     Debug("Loaded PGM: %ux%u\n", img_w, img_h);
@@ -298,12 +326,35 @@ int main(int argc, char *argv[])
 
     // Keep mode behavior consistent with other examples.
     set_display_mode(epd_mode);
-    EPD_IT8951_8bp_Refresh(g_tx_buf, 0, 0, draw_w, draw_h, false, target_addr);
-    DEV_Delay_ms(12000);
+
+    update_start_s = monotonic_seconds();
+    if (incremental_mode) {
+        Debug("Refresh mode: incremental scanline\n");
+        for (UWORD y = 0; y < draw_h; y++) {
+            EPD_IT8951_8bp_Refresh(g_tx_buf + (size_t)y * draw_w, 0, y, draw_w, 1, false, target_addr);
+            if (((y + 1) % 32 == 0) || (y + 1 == draw_h)) {
+                double pct = ((double)(y + 1) * 100.0) / (double)draw_h;
+                Debug("Progress: %u/%u lines (%.1f%%)\n", y + 1, draw_h, pct);
+            }
+        }
+    } else {
+        Debug("Refresh mode: full frame\n");
+        EPD_IT8951_8bp_Refresh(g_tx_buf, 0, 0, draw_w, draw_h, false, target_addr);
+    }
+
+    // Ensure display update has completed before timing/reporting.
+    wait_for_display_ready();
+    update_end_s = monotonic_seconds();
 
     free(img_pixels);
     img_pixels = NULL;
+    free(g_tx_buf);
+    g_tx_buf = NULL;
 
-    cleanup_and_exit(0);
+    wall_end_s = monotonic_seconds();
+    Debug("Image update time: %.3f seconds\n", update_end_s - update_start_s);
+    Debug("Total wall clock (init->finish): %.3f seconds\n", wall_end_s - wall_start_s);
+
+    DEV_Module_Exit();
     return 0;
 }

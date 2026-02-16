@@ -101,14 +101,19 @@ hexdump -C -n 2 output.pgm
 
 ```bash
 sudo ./epd_pgm -2.51 ./output.pgm 0
+sudo ./epd_pgm --incremental -2.51 ./output.pgm 0
 ```
 
 Arguments:
 - `-2.51`: your panel VCOM value (from FPC label)
 - `./output.pgm`: input grayscale PGM file
 - `0`: display mode (optional; default `0`)
+- `--incremental`: optional; refresh one scan line at a time and print progress
 
 Notes:
 - Drawing starts at `(0,0)`.
 - No scaling is done by `epd_pgm`.
 - If image dimensions exceed panel dimensions, extra pixels are truncated.
+- Program prints:
+  - image update time (refresh path only)
+  - total wall clock time from initialization to finish
