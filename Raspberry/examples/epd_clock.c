@@ -278,7 +278,7 @@ int main(int argc, char *argv[])
             draw_clock_face_mono(panel_w, panel_h, &tm_now);
             clock_gettime(CLOCK_MONOTONIC, &t1);
 
-            EPD_IT8951_1bp_Multi_Frame_Write(g_mono_panel_face_buf, 0, 0, panel_w, panel_h, base_addr, false);
+            EPD_IT8951_1bp_Multi_Frame_Write(g_mono_panel_face_buf, 0, 0, panel_w, panel_h, base_addr, true);
             clock_gettime(CLOCK_MONOTONIC, &t2);
 
             EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(0, 0, panel_w, panel_h, GC16_Mode, base_addr);
