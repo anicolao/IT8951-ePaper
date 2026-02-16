@@ -259,8 +259,12 @@ int main(int argc, char *argv[])
     const UWORD sleep_exit_delay_ms = 500;
     int argi = 1;
     bool incremental_mode = false;
-    bool clear_enabled = true;
-    UWORD clear_mode = INIT_Mode;
+    typedef enum {
+        CLEAR_INIT_4BPP = 0,
+        CLEAR_FAST_1BPP = 1,
+        CLEAR_NONE = 2
+    } clear_policy_t;
+    clear_policy_t clear_policy = CLEAR_INIT_4BPP;
     UWORD vcom = 0;
     int epd_mode = 0;
     UDOUBLE target_addr = 0;
@@ -289,10 +293,9 @@ int main(int argc, char *argv[])
         if (strcmp(argv[argi], "--incremental") == 0) {
             incremental_mode = true;
         } else if (strcmp(argv[argi], "--no-clear") == 0) {
-            clear_enabled = false;
+            clear_policy = CLEAR_NONE;
         } else if (strcmp(argv[argi], "--fast-clear") == 0) {
-            clear_enabled = true;
-            clear_mode = GC16_Mode;
+            clear_policy = CLEAR_FAST_1BPP;
         } else {
             Debug("Unknown option: %s\n", argv[argi]);
             Debug("Usage: sudo ./epd_pgm [--incremental] [--no-clear|--fast-clear] <VCOM> <image.pgm> [mode]\n");
@@ -327,8 +330,20 @@ int main(int argc, char *argv[])
     init_end_s = monotonic_seconds();
 
     // Clear first to minimize ghosting from previously displayed content.
-    if (clear_enabled) {
-        EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, clear_mode);
+    if (clear_policy == CLEAR_INIT_4BPP) {
+        Debug("Clear mode: INIT 4bpp\n");
+        EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, INIT_Mode);
+    } else if (clear_policy == CLEAR_FAST_1BPP) {
+        UDOUBLE clear_size = ((panel_w % 8 == 0) ? (panel_w / 8) : (panel_w / 8 + 1)) * panel_h;
+        UBYTE *clear_1bpp = (UBYTE *)malloc(clear_size);
+        if (clear_1bpp == NULL) {
+            Debug("Failed to allocate clear buffer\n");
+            cleanup_and_exit(1);
+        }
+        memset(clear_1bpp, 0xFF, clear_size);
+        Debug("Clear mode: FAST 1bpp\n");
+        EPD_IT8951_1bp_Refresh(clear_1bpp, 0, 0, panel_w, panel_h, A2_Mode, target_addr, true);
+        free(clear_1bpp);
     } else {
         Debug("Clear mode: skipped (--no-clear)\n");
     }

@@ -112,7 +112,7 @@ Arguments:
 - `0`: display mode (optional; default `0`)
 - `--incremental`: optional; refresh in incremental chunks (32 lines at a time, packed 4bpp) and print progress
 - `--no-clear`: optional; skip pre-clear for speed (may increase ghosting)
-- `--fast-clear`: optional; pre-clear using `GC16` mode (faster than `INIT`, less aggressive)
+- `--fast-clear`: optional; pre-clear using full-screen `1bpp` white refresh (lower data volume, faster, less aggressive)
 
 Notes:
 - Drawing starts at `(0,0)`.
