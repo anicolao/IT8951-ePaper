@@ -179,24 +179,24 @@ static void align_bbox_for_1bpp(int *x0, int *x1, int max_w)
     if (*x1 < *x0) *x1 = *x0;
 
     // 1bpp writes are addressed as X/8, W/8.
-    // The vendor write path packs by 16-bit words, so keep width at 16-pixel multiples.
-    *x0 &= ~7;
+    // In practice (matching Waveshare examples), dynamic ROIs are safest on 32px boundaries.
+    *x0 &= ~31;
     if (*x0 < 0) *x0 = 0;
-    *x1 = ((*x1 + 1 + 15) & ~15) - 1;
+    *x1 = ((*x1 + 1 + 31) & ~31) - 1;
     if (*x1 >= max_w) *x1 = max_w - 1;
 
-    // Enforce W multiple of 16 after right-edge clamp.
-    if (((*x1 - *x0 + 1) & 15) != 0) {
-        *x1 = *x0 + (((*x1 - *x0 + 1) + 15) & ~15) - 1;
+    // Enforce W multiple of 32 after right-edge clamp.
+    if (((*x1 - *x0 + 1) & 31) != 0) {
+        *x1 = *x0 + (((*x1 - *x0 + 1) + 31) & ~31) - 1;
         if (*x1 >= max_w) {
             *x1 = max_w - 1;
-            while (((*x1 - *x0 + 1) & 15) != 0 && *x0 >= 16) {
-                *x0 -= 8;
+            while (((*x1 - *x0 + 1) & 31) != 0 && *x0 >= 32) {
+                *x0 -= 32;
             }
-            *x0 &= ~7;
+            *x0 &= ~31;
             if (*x0 < 0) *x0 = 0;
             if (*x1 < *x0) *x1 = *x0;
-            *x1 = *x0 + (((*x1 - *x0 + 1) + 15) & ~15) - 1;
+            *x1 = *x0 + (((*x1 - *x0 + 1) + 31) & ~31) - 1;
             if (*x1 >= max_w) *x1 = max_w - 1;
         }
     }
@@ -252,15 +252,15 @@ int main(int argc, char *argv[])
 
     roi_w = (panel_w * 8) / 10;
     roi_h = (panel_h * 8) / 10;
-    roi_w = roi_w - (roi_w % 16);
+    roi_w = roi_w - (roi_w % 32);
     roi_h = roi_h - (roi_h % 2);
     roi_x = (panel_w - roi_w) / 2;
     roi_y = (panel_h - roi_h) / 2;
     // Keep ROI X aligned for 1bpp absolute-address updates (X/8 path in IT8951).
-    roi_x &= ~7;
+    roi_x &= ~31;
     if (roi_x + roi_w > panel_w) {
         roi_w = panel_w - roi_x;
-        roi_w = roi_w - (roi_w % 16);
+        roi_w = roi_w - (roi_w % 32);
     }
 
     roi_size = ((roi_w * 4 % 8 == 0) ? (roi_w * 4 / 8) : (roi_w * 4 / 8 + 1)) * roi_h;
@@ -340,6 +340,14 @@ int main(int argc, char *argv[])
             align_bbox_for_1bpp(&x0, &x1, roi_w);
             bw = (UWORD)(x1 - x0 + 1);
             bh = (UWORD)(y1 - y0 + 1);
+            {
+                UWORD abs_x = (UWORD)(roi_x + (UWORD)x0);
+                UWORD abs_y = (UWORD)(roi_y + (UWORD)y0);
+                Debug("A2 ROI sec %02d->%02d: x=%u y=%u w=%u h=%u (x%%32=%u w%%32=%u y%%2=%u h%%2=%u)\n",
+                      prev_sec, tm_now.tm_sec,
+                      abs_x, abs_y, bw, bh,
+                      abs_x % 32, bw % 32, abs_y % 2, bh % 2);
+            }
 
             Paint_NewImage(g_mono_area_buf, bw, bh, 0, BLACK);
             Paint_SelectImage(g_mono_area_buf);
