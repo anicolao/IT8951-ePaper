@@ -272,7 +272,8 @@ int main(int argc, char *argv[])
             bh = (UWORD)(y1 - y0 + 1);
 
             for (int p = 0; p < 3; p++) {
-                copy_face_region_4bpp(g_face_buf, roi_w, g_roi_buf, roi_w, (UWORD)x0, (UWORD)y0, bw, bh);
+                // Destination is a compact bw x bh subimage; use bw as destination stride.
+                copy_face_region_4bpp(g_face_buf, roi_w, g_roi_buf, bw, (UWORD)x0, (UWORD)y0, bw, bh);
                 Paint_NewImage(g_roi_buf, bw, bh, 0, BLACK);
                 Paint_SelectImage(g_roi_buf);
                 apply_mode(epd_mode);
