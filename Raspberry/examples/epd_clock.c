@@ -174,26 +174,28 @@ static void draw_clock_face_mono(UWORD w, UWORD h, struct tm *tm_now)
 
 static void align_bbox_for_1bpp(int *x0, int *x1, int max_w)
 {
-    int w = *x1 - *x0 + 1;
-    int aw;
-
     if (*x0 < 0) *x0 = 0;
     if (*x1 >= max_w) *x1 = max_w - 1;
+    if (*x1 < *x0) *x1 = *x0;
 
-    w = *x1 - *x0 + 1;
-    aw = (w + 31) & ~31;
-    if (aw < 32) aw = 32;
-    if (aw > max_w) aw = max_w & ~31;
-    if (aw <= 0) aw = max_w;
-
-    *x0 &= ~31;
+    // 1bpp writes are addressed as X/8, W/8, so ROI must be byte aligned.
+    *x0 &= ~7;
     if (*x0 < 0) *x0 = 0;
-    if (*x0 + aw > max_w) {
-        *x0 = max_w - aw;
-        if (*x0 < 0) *x0 = 0;
+    *x1 = ((*x1 + 1 + 7) & ~7) - 1;
+    if (*x1 >= max_w) *x1 = max_w - 1;
+
+    // Enforce W multiple of 8 after right-edge clamp.
+    if (((*x1 - *x0 + 1) & 7) != 0) {
+        *x1 = *x0 + (((*x1 - *x0 + 1) + 7) & ~7) - 1;
+        if (*x1 >= max_w) {
+            *x1 = max_w - 1;
+            *x0 = *x1 - (((*x1 - *x0 + 1) & ~7) ? ((*x1 - *x0 + 1) & ~7) : 8) + 1;
+            if (*x0 < 0) *x0 = 0;
+            *x0 &= ~7;
+            *x1 = *x0 + (((*x1 - *x0 + 1) + 7) & ~7) - 1;
+            if (*x1 >= max_w) *x1 = max_w - 1;
+        }
     }
-    *x1 = *x0 + aw - 1;
-    if (*x1 >= max_w) *x1 = max_w - 1;
 }
 
 int main(int argc, char *argv[])
@@ -246,10 +248,16 @@ int main(int argc, char *argv[])
 
     roi_w = (panel_w * 8) / 10;
     roi_h = (panel_h * 8) / 10;
-    roi_w = roi_w - (roi_w % 2);
+    roi_w = roi_w - (roi_w % 8);
     roi_h = roi_h - (roi_h % 2);
     roi_x = (panel_w - roi_w) / 2;
     roi_y = (panel_h - roi_h) / 2;
+    // Keep ROI X aligned for 1bpp absolute-address updates (X/8 path in IT8951).
+    roi_x &= ~7;
+    if (roi_x + roi_w > panel_w) {
+        roi_w = panel_w - roi_x;
+        roi_w = roi_w - (roi_w % 8);
+    }
 
     roi_size = ((roi_w * 4 % 8 == 0) ? (roi_w * 4 / 8) : (roi_w * 4 / 8 + 1)) * roi_h;
     g_face_buf = (UBYTE *)malloc(roi_size);
@@ -336,7 +344,7 @@ int main(int argc, char *argv[])
             Paint_Clear(WHITE);
             // Debug mode: draw only the ROI bounding box outline so corruption location is obvious.
             draw_rect_outline_raw(bw, bh, 0x00);
-            EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, true);
+            EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, false);
             last_sec = tm_now.tm_sec;
         }
 
