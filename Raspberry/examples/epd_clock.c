@@ -67,38 +67,6 @@ static void hand_end(UWORD cx, UWORD cy, double deg, UWORD len, UWORD max_w, UWO
     *y2 = (UWORD)y;
 }
 
-static void draw_clock_face(UWORD w, UWORD h, struct tm *tm_now)
-{
-    UWORD cx = w / 2;
-    UWORD cy = h / 2;
-    UWORD radius = (w < h ? w : h) / 2 - 16;
-    UWORD x2, y2;
-
-    Paint_Clear(WHITE);
-    Paint_DrawCircle(cx, cy, radius, 0x00, DOT_PIXEL_2X2, DRAW_FILL_EMPTY);
-
-    for (int i = 0; i < 60; i++) {
-        double a = (double)(i * 6 - 90);
-        UWORD r1 = radius - ((i % 5 == 0) ? 16 : 8);
-        UWORD r2 = radius - 2;
-        UWORD tx1, ty1, tx2, ty2;
-        hand_end(cx, cy, a, r1, w, h, &tx1, &ty1);
-        hand_end(cx, cy, a, r2, w, h, &tx2, &ty2);
-        Paint_DrawLine(tx1, ty1, tx2, ty2, (i % 5 == 0) ? 0x00 : 0x90, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-    }
-
-    double hour_deg = (((tm_now->tm_hour % 12) + tm_now->tm_min / 60.0) * 30.0) - 90.0;
-    double min_deg = (tm_now->tm_min * 6.0) - 90.0;
-
-    hand_end(cx, cy, hour_deg, radius * 55 / 100, w, h, &x2, &y2);
-    Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
-
-    hand_end(cx, cy, min_deg, radius * 75 / 100, w, h, &x2, &y2);
-    Paint_DrawLine(cx, cy, x2, y2, 0x10, DOT_PIXEL_2X2, LINE_STYLE_SOLID);
-
-    Paint_DrawCircle(cx, cy, 4, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
-}
-
 static void second_hand_end(UWORD w, UWORD h, int sec, UWORD *x2, UWORD *y2)
 {
     UWORD cx = w / 2;
@@ -108,16 +76,22 @@ static void second_hand_end(UWORD w, UWORD h, int sec, UWORD *x2, UWORD *y2)
     hand_end(cx, cy, sec_deg, radius * 90 / 100, w, h, x2, y2);
 }
 
-static void draw_second_hand(UWORD w, UWORD h, int sec, UBYTE color, int ox, int oy)
+static void minute_hand_end(UWORD w, UWORD h, int min, UWORD *x2, UWORD *y2)
 {
     UWORD cx = w / 2;
     UWORD cy = h / 2;
-    UWORD x2, y2;
-    second_hand_end(w, h, sec, &x2, &y2);
-    Paint_DrawLine((UWORD)((int)cx - ox), (UWORD)((int)cy - oy),
-                   (UWORD)((int)x2 - ox), (UWORD)((int)y2 - oy),
-                   color, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-    Paint_DrawCircle((UWORD)((int)cx - ox), (UWORD)((int)cy - oy), 3, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+    UWORD radius = (w < h ? w : h) / 2 - 16;
+    double min_deg = (min * 6.0) - 90.0;
+    hand_end(cx, cy, min_deg, radius * 75 / 100, w, h, x2, y2);
+}
+
+static void hour_hand_end(UWORD w, UWORD h, int hour, int min, UWORD *x2, UWORD *y2)
+{
+    UWORD cx = w / 2;
+    UWORD cy = h / 2;
+    UWORD radius = (w < h ? w : h) / 2 - 16;
+    double hour_deg = (((hour % 12) + min / 60.0) * 30.0) - 90.0;
+    hand_end(cx, cy, hour_deg, radius * 55 / 100, w, h, x2, y2);
 }
 
 static void draw_rect_outline_raw(UWORD w, UWORD h, UBYTE color)
@@ -135,12 +109,11 @@ static void draw_rect_outline_raw(UWORD w, UWORD h, UBYTE color)
     }
 }
 
-static void draw_clock_face_mono(UWORD w, UWORD h, struct tm *tm_now)
+static void draw_clock_background_mono(UWORD w, UWORD h)
 {
     UWORD cx = w / 2;
     UWORD cy = h / 2;
     UWORD radius = (w < h ? w : h) / 2 - 16;
-    UWORD x2, y2;
 
     Paint_Clear(WHITE);
     Paint_DrawCircle(cx, cy, radius, 0x00, DOT_PIXEL_2X2, DRAW_FILL_EMPTY);
@@ -154,22 +127,48 @@ static void draw_clock_face_mono(UWORD w, UWORD h, struct tm *tm_now)
         hand_end(cx, cy, a, r2, w, h, &tx2, &ty2);
         Paint_DrawLine(tx1, ty1, tx2, ty2, 0x00, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
     }
-
-    {
-        double hour_deg = (((tm_now->tm_hour % 12) + tm_now->tm_min / 60.0) * 30.0) - 90.0;
-        double min_deg = (tm_now->tm_min * 6.0) - 90.0;
-        hand_end(cx, cy, hour_deg, radius * 55 / 100, w, h, &x2, &y2);
-        Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
-        hand_end(cx, cy, min_deg, radius * 75 / 100, w, h, &x2, &y2);
-        Paint_DrawLine(cx, cy, x2, y2, 0x00, DOT_PIXEL_2X2, LINE_STYLE_SOLID);
-    }
-
-    Paint_DrawCircle(cx, cy, 4, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
 }
 
 static double elapsed_seconds(const struct timespec *a, const struct timespec *b)
 {
     return (double)(b->tv_sec - a->tv_sec) + ((double)(b->tv_nsec - a->tv_nsec) / 1e9);
+}
+
+static void draw_hands_mono(UWORD w, UWORD h, int hour, int min, int sec, int ox, int oy)
+{
+    UWORD cx = w / 2;
+    UWORD cy = h / 2;
+    UWORD hx, hy, mx, my, sx, sy;
+    hour_hand_end(w, h, hour, min, &hx, &hy);
+    minute_hand_end(w, h, min, &mx, &my);
+    second_hand_end(w, h, sec, &sx, &sy);
+
+    Paint_DrawLine((UWORD)((int)cx - ox), (UWORD)((int)cy - oy),
+                   (UWORD)((int)hx - ox), (UWORD)((int)hy - oy),
+                   0x00, DOT_PIXEL_3X3, LINE_STYLE_SOLID);
+    Paint_DrawLine((UWORD)((int)cx - ox), (UWORD)((int)cy - oy),
+                   (UWORD)((int)mx - ox), (UWORD)((int)my - oy),
+                   0x00, DOT_PIXEL_2X2, LINE_STYLE_SOLID);
+    Paint_DrawLine((UWORD)((int)cx - ox), (UWORD)((int)cy - oy),
+                   (UWORD)((int)sx - ox), (UWORD)((int)sy - oy),
+                   0x00, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    Paint_DrawCircle((UWORD)((int)cx - ox), (UWORD)((int)cy - oy), 3, 0x00, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+}
+
+static void expand_bbox(int *x0, int *y0, int *x1, int *y1, int x, int y, int margin, int max_w, int max_h)
+{
+    int lx = x - margin;
+    int ly = y - margin;
+    int rx = x + margin;
+    int ry = y + margin;
+    if (lx < 0) lx = 0;
+    if (ly < 0) ly = 0;
+    if (rx >= max_w) rx = max_w - 1;
+    if (ry >= max_h) ry = max_h - 1;
+    if (lx < *x0) *x0 = lx;
+    if (ly < *y0) *y0 = ly;
+    if (rx > *x1) *x1 = rx;
+    if (ry > *y1) *y1 = ry;
 }
 
 static void align_bbox_for_1bpp(int *x0, int *x1, int max_w)
@@ -212,11 +211,10 @@ int main(int argc, char *argv[])
     UDOUBLE target_addr = 0;
     UWORD roi_w = 0;
     UWORD roi_h = 0;
-    UWORD roi_x = 0;
-    UWORD roi_y = 0;
     UDOUBLE mono_panel_size = 0;
     UDOUBLE mono_roi_size = 0;
     UDOUBLE base_addr = 0;
+    int last_hour = -1;
     int last_min = -1;
     int last_sec = -1;
 
@@ -245,8 +243,6 @@ int main(int argc, char *argv[])
     base_addr = target_addr;
 
     // For second-hand updates we now compute ROIs directly on full-panel coordinates.
-    roi_x = 0;
-    roi_y = 0;
     roi_w = panel_w;
     roi_h = panel_h;
 
@@ -261,75 +257,66 @@ int main(int argc, char *argv[])
     }
 
     EPD_IT8951_Clear_Refresh(g_dev_info, target_addr, INIT_Mode);
+    {
+        struct timespec t0, t1, t2, t3;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        Paint_NewImage(g_mono_panel_face_buf, panel_w, panel_h, 0, BLACK);
+        Paint_SelectImage(g_mono_panel_face_buf);
+        apply_mode(epd_mode);
+        Paint_SetBitsPerPixel(1);
+        draw_clock_background_mono(panel_w, panel_h);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        EPD_IT8951_1bp_Multi_Frame_Write(g_mono_panel_face_buf, 0, 0, panel_w, panel_h, base_addr, true);
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(0, 0, panel_w, panel_h, GC16_Mode, base_addr);
+        clock_gettime(CLOCK_MONOTONIC, &t3);
+        Debug("Initial base face load: compose=%.3fs write=%.3fs refresh=%.3fs total=%.3fs\n",
+              elapsed_seconds(&t0, &t1),
+              elapsed_seconds(&t1, &t2),
+              elapsed_seconds(&t2, &t3),
+              elapsed_seconds(&t0, &t3));
+    }
 
     while (1) {
         time_t t = time(NULL);
         struct tm tm_now;
         localtime_r(&t, &tm_now);
 
-        if (tm_now.tm_min != last_min) {
-            struct timespec t0, t1, t2, t3;
-            clock_gettime(CLOCK_MONOTONIC, &t0);
-
-            Paint_NewImage(g_mono_panel_face_buf, panel_w, panel_h, 0, BLACK);
-            Paint_SelectImage(g_mono_panel_face_buf);
-            apply_mode(epd_mode);
-            Paint_SetBitsPerPixel(1);
-            draw_clock_face_mono(panel_w, panel_h, &tm_now);
-            clock_gettime(CLOCK_MONOTONIC, &t1);
-
-            EPD_IT8951_1bp_Multi_Frame_Write(g_mono_panel_face_buf, 0, 0, panel_w, panel_h, base_addr, true);
-            clock_gettime(CLOCK_MONOTONIC, &t2);
-
-            EPD_IT8951_1bp_Multi_Frame_Refresh_Mode(0, 0, panel_w, panel_h, GC16_Mode, base_addr);
-            clock_gettime(CLOCK_MONOTONIC, &t3);
-
-            // Re-sample time after slow full refresh so second-hand updates stay in sync.
-            {
-                time_t t_after = time(NULL);
-                struct tm tm_after;
-                localtime_r(&t_after, &tm_after);
-                last_min = tm_after.tm_min;
-                // Force immediate ROI second-hand update on next loop using current second.
-                last_sec = -1;
-                Debug("Minute refresh at %02d:%02d complete (now %02d:%02d:%02d)\n",
-                      tm_now.tm_hour, tm_now.tm_min,
-                      tm_after.tm_hour, tm_after.tm_min, tm_after.tm_sec);
-                Debug("Minute timings: compose=%.3fs write=%.3fs refresh=%.3fs total=%.3fs\n",
-                      elapsed_seconds(&t0, &t1),
-                      elapsed_seconds(&t1, &t2),
-                      elapsed_seconds(&t2, &t3),
-                      elapsed_seconds(&t0, &t3));
-            }
-        }
-
-        if (tm_now.tm_sec != last_sec) {
+        if (tm_now.tm_sec != last_sec || tm_now.tm_min != last_min || tm_now.tm_hour != last_hour) {
+            int prev_hour = (last_hour < 0) ? tm_now.tm_hour : last_hour;
+            int prev_min = (last_min < 0) ? tm_now.tm_min : last_min;
             int prev_sec = (last_sec < 0) ? tm_now.tm_sec : last_sec;
-            UWORD cx = roi_w / 2, cy = roi_h / 2;
-            UWORD xp, yp, xn, yn;
-            int margin = 8;
+            UWORD cx = panel_w / 2, cy = panel_h / 2;
+            UWORD x_old_h, y_old_h, x_old_m, y_old_m, x_old_s, y_old_s;
+            UWORD x_new_h, y_new_h, x_new_m, y_new_m, x_new_s, y_new_s;
             int x0, y0, x1, y1;
             UWORD bw, bh;
 
-            second_hand_end(roi_w, roi_h, prev_sec, &xp, &yp);
-            second_hand_end(roi_w, roi_h, tm_now.tm_sec, &xn, &yn);
+            hour_hand_end(panel_w, panel_h, prev_hour, prev_min, &x_old_h, &y_old_h);
+            minute_hand_end(panel_w, panel_h, prev_min, &x_old_m, &y_old_m);
+            second_hand_end(panel_w, panel_h, prev_sec, &x_old_s, &y_old_s);
+            hour_hand_end(panel_w, panel_h, tm_now.tm_hour, tm_now.tm_min, &x_new_h, &y_new_h);
+            minute_hand_end(panel_w, panel_h, tm_now.tm_min, &x_new_m, &y_new_m);
+            second_hand_end(panel_w, panel_h, tm_now.tm_sec, &x_new_s, &y_new_s);
 
-            x0 = (int)cx; if ((int)xp < x0) x0 = xp; if ((int)xn < x0) x0 = xn; x0 -= margin;
-            y0 = (int)cy; if ((int)yp < y0) y0 = yp; if ((int)yn < y0) y0 = yn; y0 -= margin;
-            x1 = (int)cx; if ((int)xp > x1) x1 = xp; if ((int)xn > x1) x1 = xn; x1 += margin;
-            y1 = (int)cy; if ((int)yp > y1) y1 = yp; if ((int)yn > y1) y1 = yn; y1 += margin;
+            x0 = (int)panel_w - 1;
+            y0 = (int)panel_h - 1;
+            x1 = 0;
+            y1 = 0;
+            expand_bbox(&x0, &y0, &x1, &y1, cx, cy, 8, panel_w, panel_h);
+            expand_bbox(&x0, &y0, &x1, &y1, x_old_h, y_old_h, 8, panel_w, panel_h);
+            expand_bbox(&x0, &y0, &x1, &y1, x_old_m, y_old_m, 6, panel_w, panel_h);
+            expand_bbox(&x0, &y0, &x1, &y1, x_old_s, y_old_s, 4, panel_w, panel_h);
+            expand_bbox(&x0, &y0, &x1, &y1, x_new_h, y_new_h, 8, panel_w, panel_h);
+            expand_bbox(&x0, &y0, &x1, &y1, x_new_m, y_new_m, 6, panel_w, panel_h);
+            expand_bbox(&x0, &y0, &x1, &y1, x_new_s, y_new_s, 4, panel_w, panel_h);
 
-            if (x0 < 0) x0 = 0;
-            if (y0 < 0) y0 = 0;
-            if (x1 >= (int)roi_w) x1 = (int)roi_w - 1;
-            if (y1 >= (int)roi_h) y1 = (int)roi_h - 1;
-
-            align_bbox_for_1bpp(&x0, &x1, roi_w);
+            align_bbox_for_1bpp(&x0, &x1, panel_w);
             bw = (UWORD)(x1 - x0 + 1);
             bh = (UWORD)(y1 - y0 + 1);
             {
-                UWORD abs_x = (UWORD)(roi_x + (UWORD)x0);
-                UWORD abs_y = (UWORD)(roi_y + (UWORD)y0);
+                UWORD abs_x = (UWORD)x0;
+                UWORD abs_y = (UWORD)y0;
                 Debug("A2 ROI sec %02d->%02d: x=%u y=%u w=%u h=%u (x%%32=%u w%%32=%u y%%2=%u h%%2=%u)\n",
                       prev_sec, tm_now.tm_sec,
                       abs_x, abs_y, bw, bh,
@@ -346,16 +333,18 @@ int main(int argc, char *argv[])
                 UWORD dst_stride = (bw + 7) / 8;
                 for (UWORD ry = 0; ry < bh; ry++) {
                     memcpy(g_mono_area_buf + (ry * dst_stride),
-                           g_mono_panel_face_buf + (((roi_y + (UWORD)y0 + ry) * src_stride)) + ((roi_x + (UWORD)x0) / 8),
+                           g_mono_panel_face_buf + ((((UWORD)y0 + ry) * src_stride)) + ((UWORD)x0 / 8),
                            dst_stride);
                 }
             }
 #if DEBUG_WITH_BOUNDING_BOX
             draw_rect_outline_raw(bw, bh, 0x00);
 #else
-            draw_second_hand(roi_w, roi_h, tm_now.tm_sec, 0x00, x0, y0);
+            draw_hands_mono(panel_w, panel_h, tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec, x0, y0);
 #endif
-            EPD_IT8951_1bp_Refresh(g_mono_area_buf, roi_x + (UWORD)x0, roi_y + (UWORD)y0, bw, bh, A2_Mode, target_addr, false);
+            EPD_IT8951_1bp_Refresh(g_mono_area_buf, (UWORD)x0, (UWORD)y0, bw, bh, A2_Mode, target_addr, false);
+            last_hour = tm_now.tm_hour;
+            last_min = tm_now.tm_min;
             last_sec = tm_now.tm_sec;
         }
 
